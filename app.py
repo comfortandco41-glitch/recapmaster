@@ -176,5 +176,6 @@ with gr.Blocks(title="RecapMaster - AI Video Recap & Dubbing") as demo:
     )
 
 if __name__ == "__main__":
-    # Port 7860 is default for Hugging Face Spaces
-    demo.queue().launch(server_name="0.0.0.0", server_port=7860)
+    is_colab = "google.colab" in sys.modules or os.getenv("COLAB_GPU") is not None
+    share_mode = is_colab or os.getenv("SHARE", "true").lower() == "true"
+    demo.queue().launch(server_name="0.0.0.0", server_port=7860, share=share_mode)
