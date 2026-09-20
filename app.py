@@ -23,19 +23,8 @@ from worker.config import WORKSPACE_DIR
 
 VOXCPM_DEFAULT = os.getenv("VOXCPM_ENDPOINT", "https://43bd4b864d1a9c7163.gradio.live")
 
-try:
-    import spaces
-    has_spaces = True
-except ImportError:
-    has_spaces = False
-
-if has_spaces:
-    @spaces.GPU(duration=180)
-    def run_worker_job(job_id: str):
-        return process_job(job_id, exit_on_error=False)
-else:
-    def run_worker_job(job_id: str):
-        return process_job(job_id, exit_on_error=False)
+def run_worker_job(job_id: str):
+    return process_job(job_id, exit_on_error=False)
 
 VOICE_CHOICES = [
     ("VoxCPM 2 AI Voice (via Colab)", "voxcpm"),
