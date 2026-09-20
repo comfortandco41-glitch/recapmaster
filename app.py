@@ -23,6 +23,20 @@ from worker.config import WORKSPACE_DIR
 
 VOXCPM_DEFAULT = os.getenv("VOXCPM_ENDPOINT", "https://43bd4b864d1a9c7163.gradio.live")
 
+try:
+    import spaces
+    has_spaces = True
+except ImportError:
+    has_spaces = False
+
+if has_spaces:
+    @spaces.GPU(duration=180)
+    def run_worker_job(job_id: str):
+        return process_job(job_id, exit_on_error=False)
+else:
+    def run_worker_job(job_id: str):
+        return process_job(job_id, exit_on_error=False)
+
 VOICE_CHOICES = [
     ("VoxCPM 2 AI Voice (via Colab)", "voxcpm"),
     ("Burmese Female - Nilar (Edge-TTS)", "my-MM-NilarNeural"),
@@ -84,8 +98,8 @@ def generate_recap(
         )
 
         yield None, None, log("📥 Downloading / Extracting source video...", 0.15)
-        # Execute the pipeline
-        final_video = process_job(job_id, exit_on_error=False)
+        # Execute the pipeline with GPU acceleration
+        final_video = run_worker_job(job_id)
 
         if not final_video or not Path(final_video).exists():
             raise RuntimeError("Final video was not generated or file is missing.")
