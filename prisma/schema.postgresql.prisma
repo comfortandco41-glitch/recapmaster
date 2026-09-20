@@ -1,0 +1,67 @@
+// Production Prisma Schema for Promovie Recap (PostgreSQL / Supabase)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Job {
+  id              String      @id
+  userId          String?     @default("anonymous") @map("user_id")
+  sourceUrl       String      @map("source_url")
+  sourcePlatform  String      @map("source_platform") // YOUTUBE, BILIBILI
+  status          String      @default("QUEUED") // QUEUED, DOWNLOADING, DOWNLOADED, TRANSCRIBING, etc.
+  progress        Int         @default(0)
+  errorCode       String?     @map("error_code")
+  errorMessage    String?     @map("error_message")
+  language        String?     @default("en")
+  voice           String?     @default("default")
+  voxcpmEndpoint  String?     @map("voxcpm_endpoint")
+  voxcpmApiKey    String?     @map("voxcpm_api_key")
+  createdAt       DateTime    @default(now()) @map("created_at")
+  startedAt       DateTime?   @map("started_at")
+  completedAt     DateTime?   @map("completed_at")
+  expiresAt       DateTime?   @map("expires_at")
+  deletedAt       DateTime?   @map("deleted_at")
+
+  assets          JobAsset[]
+  events          JobEvent[]
+
+  @@index([status])
+  @@index([expiresAt])
+  @@map("jobs")
+}
+
+model JobAsset {
+  id          String    @id
+  jobId       String    @map("job_id")
+  type        String    // SOURCE_VIDEO, SOURCE_AUDIO, TRANSCRIPT_JSON, SRT, RECAP_SCRIPT, VOICE_AUDIO, FINAL_VIDEO
+  storageKey  String    @map("storage_key")
+  mimeType    String    @map("mime_type")
+  sizeBytes   BigInt?   @map("size_bytes")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  expiresAt   DateTime? @map("expires_at")
+
+  job         Job       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_assets")
+}
+
+model JobEvent {
+  id        String   @id
+  jobId     String   @map("job_id")
+  stage     String   // QUEUED, DOWNLOADING, TRANSCRIBING, etc.
+  message   String
+  progress  Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@map("job_events")
+}

@@ -1,0 +1,5 @@
+ffmpeg
+libass-dev
+fonts-sil-padauk
+fonts-noto-core
+fontconfig

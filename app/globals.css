@@ -1,0 +1,35 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 4%;
+    --foreground: 0 0% 98%;
+    --card: 240 10% 7%;
+    --card-foreground: 0 0% 98%;
+    --border: 240 6% 16%;
+    --primary: 265 89% 66%;
+    --primary-foreground: 0 0% 100%;
+    --accent: 187 92% 55%;
+    --accent-foreground: 240 10% 4%;
+    --muted: 240 5% 26%;
+    --muted-foreground: 240 5% 65%;
+  }
+
+  body {
+    @apply bg-[hsl(var(--background))] text-[hsl(var(--foreground))] antialiased selection:bg-purple-600 selection:text-white min-h-screen;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+}
+
+/* Custom glow and backdrop effects */
+.recap-glow {
+  box-shadow: 0 0 50px -10px rgba(147, 51, 234, 0.25);
+}
+
+.recap-glass {
+  background: rgba(18, 18, 23, 0.75);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
