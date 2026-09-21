@@ -11,6 +11,21 @@ const CreateJobSchema = z.object({
   soundStyle: z.string().optional().default("cinematic_recap"),
   voxcpmEndpoint: z.string().optional(),
   voxcpmApiKey: z.string().optional(),
+  geminiApiKey: z.string().optional(),
+  subtitlePlacement: z.string().optional().default("bottom"),
+  subtitleSize: z.number().optional().default(1.0),
+  subtitleMarginV: z.number().optional(),
+  voiceRate: z.string().optional().default("+10%"),
+  voicePitch: z.string().optional().default("-2Hz"),
+  bgMusicVolume: z.number().optional().default(0.15),
+  blurBox: z.object({
+    enabled: z.boolean(),
+    x_pct: z.number().optional(),
+    y_pct: z.number().optional(),
+    w_pct: z.number().optional(),
+    h_pct: z.number().optional(),
+    strength: z.number().optional(),
+  }).optional(),
   recap: z.boolean().optional().default(true),
   consentConfirmed: z.boolean().refine((val) => val === true, {
     message:
@@ -46,7 +61,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { url, language, voice, soundStyle, voxcpmEndpoint, voxcpmApiKey } = parseResult.data;
+    const {
+      url,
+      language,
+      voice,
+      soundStyle,
+      voxcpmEndpoint,
+      voxcpmApiKey,
+      geminiApiKey,
+      subtitlePlacement,
+      subtitleSize,
+      subtitleMarginV,
+      voiceRate,
+      voicePitch,
+      bgMusicVolume,
+      blurBox,
+    } = parseResult.data;
 
     // Validate media URL
     const urlValidation = validateMediaUrl(url);
@@ -77,6 +107,14 @@ export async function POST(request: NextRequest) {
       soundStyle,
       voxcpmEndpoint: voxcpmEndpoint?.trim() || undefined,
       voxcpmApiKey: voxcpmApiKey?.trim() || undefined,
+      geminiApiKey: geminiApiKey?.trim() || undefined,
+      subtitlePlacement,
+      subtitleSize,
+      subtitleMarginV,
+      voiceRate,
+      voicePitch,
+      bgMusicVolume,
+      blurBoxConfig: blurBox ? JSON.stringify(blurBox) : undefined,
     });
 
     // Dispatch job to background media worker queue

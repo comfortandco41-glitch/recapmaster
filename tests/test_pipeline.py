@@ -15,7 +15,7 @@ from worker.pipeline.whisper import transcribe_audio
 from worker.pipeline.recap import generate_recap_script
 from worker.pipeline.voice import generate_voice_narration
 from worker.pipeline.plan import build_render_plan
-from worker.pipeline.render import render_recap_video
+from worker.pipeline.render import render_recap_video, generate_ass_subtitles, generate_preview_frame
 from worker.pipeline.cleanup import cleanup_job
 from worker.pipeline.download import get_media_info
 
@@ -119,6 +119,87 @@ class TestMediaPipeline(unittest.TestCase):
         deleted_job = get_job(self.job_id)
         self.assertEqual(deleted_job["status"], "DELETED", "Job status must be DELETED after cleanup")
         print("[OK] Cleanup verified: All temporary media files and directories purged")
+
+    def test_subtitle_and_blur_rendering(self):
+        print("\n--- Testing Subtitle Placement, Size Scaling & Logo Blur Rendering ---")
+        test_dir = self.job_dir / "custom_render"
+        test_dir.mkdir(parents=True, exist_ok=True)
+
+        # 1. Test ASS subtitle generation with custom placement (top), scale (1.3x) and margin (40px)
+        sample_srt = test_dir / "sample.srt"
+        sample_srt.write_text("1\n00:00:00,000 --> 00:00:03,000\nစမ်းသပ်စာတန်းထိုး နေရာချထားမှု\n", encoding="utf-8")
+        out_ass = test_dir / "test.ass"
+        generate_ass_subtitles(
+            srt_path=sample_srt,
+            ass_output_path=out_ass,
+            video_width=1280,
+            video_height=720,
+            placement="top",
+            font_size_scale=1.3,
+            margin_v=40,
+        )
+        self.assertTrue(out_ass.exists(), "ASS file must be generated")
+        ass_content = out_ass.read_text(encoding="utf-8-sig")
+        # In ASS Style, alignment 8 corresponds to Top-Center
+        self.assertIn(",8,16,16,40,", ass_content, "ASS style must contain alignment=8 and margin_v=40")
+
+        # 2. Test live frame preview generation with logo blur box
+        preview_img = test_dir / "preview.png"
+        blur_config = {
+            "enabled": True,
+            "x_pct": 0.78,
+            "y_pct": 0.04,
+            "w_pct": 0.18,
+            "h_pct": 0.08,
+            "strength": 16,
+        }
+        res_img = generate_preview_frame(
+            source_video=self.source_file,
+            output_image_path=preview_img,
+            subtitle_placement="top",
+            subtitle_size_scale=1.2,
+            subtitle_margin_v=35,
+            blur_box=blur_config,
+        )
+        self.assertTrue(res_img.exists(), "Preview image must exist")
+        self.assertGreater(res_img.stat().st_size, 1000, "Preview image must have valid size")
+        print(f"[OK] Frame preview generated: {res_img} ({res_img.stat().st_size} bytes)")
+
+        # 3. Test video rendering with both subtitle and blur box filters applied
+        synthetic_voice = test_dir / "dummy_voice.wav"
+        cmd_voice = [
+            FFMPEG_BIN, "-y",
+            "-f", "lavfi", "-i", "sine=frequency=500:duration=4",
+            "-c:a", "pcm_s16le", str(synthetic_voice)
+        ]
+        subprocess.run(cmd_voice, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+
+        plan_path = test_dir / "plan.json"
+        import json
+        plan_path.write_text(json.dumps({"scenes": []}), encoding="utf-8")
+
+        # Ensure transcript is in job_dir for subtitle discovery
+        transcript_dir = self.job_dir / "transcript"
+        transcript_dir.mkdir(parents=True, exist_ok=True)
+        (transcript_dir / "transcript.srt").write_text("1\n00:00:00,000 --> 00:00:04,000\nစမ်းသပ်စာတန်း\n", encoding="utf-8")
+
+        final_video = render_recap_video(
+            job_id=self.job_id,
+            source_video=self.source_file,
+            voice_audio=synthetic_voice,
+            plan_path=plan_path,
+            burn_subtitles=True,
+            subtitle_placement="top",
+            subtitle_size_scale=1.2,
+            subtitle_margin_v=40,
+            blur_box=blur_config,
+        )
+        self.assertTrue(final_video.exists(), "Final video with blur and subtitles must exist")
+        v_info = get_media_info(final_video)
+        self.assertTrue(any(s.get("codec_type") == "video" for s in v_info.get("streams", [])))
+        print(f"[OK] Render with blur box and top subtitles verified: {final_video}")
+
+        cleanup_job(self.job_id)
 
 if __name__ == "__main__":
     unittest.main()

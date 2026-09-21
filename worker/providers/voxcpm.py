@@ -48,10 +48,26 @@ class VoxCPMProvider(VoiceProvider):
         output_path: Path,
         language: str = "en",
         voice: str = "default",
+        rate: Optional[str] = None,
+        pitch: Optional[str] = None,
+        volume: Optional[str] = None,
     ) -> Dict[str, Any]:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         if output_path.exists() and output_path.stat().st_size > 1024:
             return {"status": "success", "file": str(output_path), "cached": True}
+
+        # If user explicitly chose an Edge Neural voice (not "default" or "voxcpm"), use Edge TTS directly
+        is_edge_voice = voice and voice not in ("default", "voxcpm", "standard") and ("Neural" in voice or voice.startswith("my-") or voice.startswith("en-"))
+        if is_edge_voice or not self.endpoint:
+            return self._fallback_tts(
+                text=text,
+                output_path=output_path,
+                language=language,
+                voice=voice,
+                rate=rate,
+                pitch=pitch,
+                volume=volume,
+            )
 
         headers = {
             "Content-Type": "application/json",
@@ -65,7 +81,7 @@ class VoxCPMProvider(VoiceProvider):
             try:
                 return self._call_gradio_generate(text, output_path, headers)
             except Exception as ge:
-                print(f"[VoxCPM] Gradio call error: {ge}. Trying standard REST...")
+                print(f"[VoxCPM] Gradio call error: {ge}. Trying standard REST / fallback...")
 
         # Strategy 2: Standard REST candidates (/generate, /api/generate, /v1/audio/speech, etc.)
         candidate_paths = [
@@ -102,20 +118,13 @@ class VoxCPMProvider(VoiceProvider):
                     retryable=True,
                 )
             except requests.exceptions.ConnectionError:
-                return self._fallback_tts(text, output_path, language)
+                return self._fallback_tts(text, output_path, language, voice=voice, rate=rate, pitch=pitch, volume=volume)
             except Exception as e:
                 last_error = str(e)
 
-        # If all candidates failed
-        if last_error:
-            raise VoiceProviderError(
-                code="VOICE_PROVIDER_ERROR",
-                message=f"VoxCPM provider returned error: {last_error}",
-                retryable=True,
-            )
-
-        # Fallback to local synthesizer
-        return self._fallback_tts(text, output_path, language)
+        # Fallback to local Edge synthesizer if external server failed
+        print(f"[VoxCPM] Remote endpoint returned ({last_error or 'endpoint unreachable'}). Falling back to Edge TTS studio voice...")
+        return self._fallback_tts(text, output_path, language, voice=voice, rate=rate, pitch=pitch, volume=volume)
 
     def _is_gradio_endpoint(self) -> bool:
         try:
@@ -227,33 +236,53 @@ class VoxCPMProvider(VoiceProvider):
 
         return self._normalize_wav(output_path)
 
-    def _fallback_tts(self, text: str, output_path: Path, language: str) -> Dict[str, Any]:
+    def _fallback_tts(
+        self,
+        text: str,
+        output_path: Path,
+        language: str,
+        voice: str = "default",
+        rate: Optional[str] = None,
+        pitch: Optional[str] = None,
+        volume: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
-        Resilient local fallback using Edge TTS neural voices when external Colab endpoint is offline.
+        Resilient local fallback using Edge TTS neural voices when external Colab endpoint is offline,
+        with studio mastering to eliminate robotic artifacts.
         """
         import sys
         temp_mp3 = output_path.with_suffix(".mp3")
         
-        # Select appropriate natural voice for the language
-        if language in ("my", "burmese"):
-            voice = "my-MM-ThihaNeural"
-        elif language in ("zh", "chinese", "mandarin"):
-            voice = "zh-CN-YunxiNeural"
-        elif language in ("es", "spanish"):
-            voice = "es-ES-AlvaroNeural"
-        elif language in ("ja", "japanese"):
-            voice = "ja-JP-KeitaNeural"
-        elif language in ("id", "indonesian"):
-            voice = "id-ID-ArdiNeural"
-        else:
-            voice = "en-US-ChristopherNeural"
+        # Select appropriate natural voice for the language if not explicitly provided
+        selected_voice = voice
+        if not selected_voice or selected_voice in ("default", "voxcpm", "standard"):
+            if language in ("my", "burmese"):
+                selected_voice = "my-MM-NilarNeural"  # Nilar is rich and natural for narration
+            elif language in ("zh", "chinese", "mandarin"):
+                selected_voice = "zh-CN-YunxiNeural"
+            elif language in ("es", "spanish"):
+                selected_voice = "es-ES-AlvaroNeural"
+            elif language in ("ja", "japanese"):
+                selected_voice = "ja-JP-KeitaNeural"
+            elif language in ("id", "indonesian"):
+                selected_voice = "id-ID-ArdiNeural"
+            else:
+                selected_voice = "en-US-ChristopherNeural"
 
-        print(f"[VoxCPM] External endpoint unavailable. Using Edge Neural TTS fallback ({voice})...")
+        # Rate and pitch adjustments to make speech sound natural and human
+        actual_rate = rate or "+10%"
+        actual_pitch = pitch or "-2Hz"
+        actual_vol = volume or "+0%"
+
+        print(f"[Voice Studio] Using Edge Neural TTS ({selected_voice}) [Rate: {actual_rate}, Pitch: {actual_pitch}]...")
         cmd = [
             sys.executable,
             "-m", "edge_tts",
             "--text", text,
-            "--voice", voice,
+            "--voice", selected_voice,
+            f"--rate={actual_rate}",
+            f"--pitch={actual_pitch}",
+            f"--volume={actual_vol}",
             "--write-media", str(temp_mp3),
         ]
         try:
@@ -288,11 +317,20 @@ class VoxCPMProvider(VoiceProvider):
 
     def _normalize_wav(self, wav_path: Path) -> Dict[str, Any]:
         norm_path = wav_path.parent / "voice_norm.wav"
+        # Studio vocal enhancement: gentle highpass to eliminate sub-rumble, warm low-mid presence,
+        # smooth de-harshing, gentle broadcast compression, and EBU R128 loudness normalization
+        vocal_filter = (
+            "highpass=f=75,lowpass=f=12000,"
+            "equalizer=f=220:t=q:w=1.2:g=2.5,"
+            "equalizer=f=3300:t=q:w=1.5:g=1.8,"
+            "acompressor=threshold=0.12:ratio=3:attack=15:release=120,"
+            "loudnorm=I=-16:TP=-1.5:LRA=10"
+        )
         cmd = [
             FFMPEG_BIN,
             "-y",
             "-i", str(wav_path),
-            "-filter:a", "loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-filter:a", vocal_filter,
             "-ac", "1",
             "-ar", "24000",
             str(norm_path),

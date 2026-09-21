@@ -46,9 +46,20 @@ prisma/*.db-journal
 
 __pycache__/
 *.pyc
-
 .agents/
 
+preview_temp/
 *.ttf
+!android-recapmaster/app/src/main/assets/fonts/Padauk-Regular.ttf
+!worker/assets/Padauk-Regular.ttf
+
+# Android build artifacts
+android-recapmaster/.gradle/
+android-recapmaster/build/
+android-recapmaster/*/build/
+android-recapmaster/local.properties
+android-recapmaster/.idea/
+android-recapmaster/*.iml
+
 **/*.db
 **/*.db-journal

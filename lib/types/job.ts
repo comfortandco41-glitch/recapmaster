@@ -30,6 +30,7 @@ export interface CreateJobInput {
   voice?: string;
   voxcpmEndpoint?: string;
   voxcpmApiKey?: string;
+  geminiApiKey?: string;
   recap?: boolean;
 }
 
@@ -63,6 +64,7 @@ export interface JobDetailResponse {
   language: string;
   voice: string;
   voxcpmEndpoint?: string | null;
+  geminiApiKey?: string | null;
   createdAt: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -70,6 +72,18 @@ export interface JobDetailResponse {
   deletedAt: string | null;
   events: JobEventResponse[];
   assets: JobAssetResponse[];
+  subtitlePlacement?: string | null;
+  subtitleSize?: number | null;
+  subtitleMarginV?: number | null;
+  blurBoxConfig?: string | null;
+  soundStyle?: string | null;
+  voiceRate?: string | null;
+  voicePitch?: string | null;
+  bgMusicVolume?: number | null;
+  playbackSpeed?: number | null;
+  hasFinalVideo?: boolean;
+  hasSourceVideo?: boolean;
+  isPurged?: boolean;
 }
 
 export interface CreateJobResponse {

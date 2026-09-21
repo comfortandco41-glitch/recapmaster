@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getJobById, deleteJobRecord } from "@/lib/db/jobs";
+import path from "path";
+import fs from "fs";
 
 interface RouteParams {
   params: {
@@ -28,6 +30,12 @@ export async function GET(
       );
     }
 
+    const finalVideoPath = path.join(process.cwd(), "storage", "jobs", id, "render", "final.mp4");
+    const sourcePath = path.join(process.cwd(), "storage", "jobs", id, "source");
+    const hasFinalVideo = fs.existsSync(finalVideoPath);
+    const hasSourceVideo = fs.existsSync(sourcePath);
+    const isPurged = !hasFinalVideo && (job.status === "READY" || job.events.some((e) => e.stage === "CLEANUP_POST_DOWNLOAD"));
+
     return NextResponse.json({
       id: job.id,
       userId: job.userId,
@@ -39,6 +47,18 @@ export async function GET(
       errorMessage: job.errorMessage,
       language: job.language,
       voice: job.voice,
+      subtitlePlacement: job.subtitlePlacement ?? "bottom",
+      subtitleSize: job.subtitleSize ?? 1.0,
+      subtitleMarginV: job.subtitleMarginV ?? 30,
+      blurBoxConfig: job.blurBoxConfig ?? null,
+      soundStyle: job.soundStyle ?? "cinematic_recap",
+      voiceRate: job.voiceRate ?? "+10%",
+      voicePitch: job.voicePitch ?? "-2Hz",
+      bgMusicVolume: job.bgMusicVolume ?? 0.15,
+      playbackSpeed: job.playbackSpeed ?? 1.0,
+      hasFinalVideo,
+      hasSourceVideo,
+      isPurged,
       createdAt: job.createdAt.toISOString(),
       startedAt: job.startedAt?.toISOString() ?? null,
       completedAt: job.completedAt?.toISOString() ?? null,

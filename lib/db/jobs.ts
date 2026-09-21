@@ -12,6 +12,14 @@ export interface CreateJobParams {
   voxcpmApiKey?: string;
   soundStyle?: string;
   expiresInMinutes?: number;
+  subtitlePlacement?: string;
+  subtitleSize?: number;
+  subtitleMarginV?: number;
+  blurBoxConfig?: string;
+  voiceRate?: string;
+  voicePitch?: string;
+  bgMusicVolume?: number;
+  geminiApiKey?: string;
 }
 
 export async function createJobRecord(params: CreateJobParams) {
@@ -37,12 +45,20 @@ export async function createJobRecord(params: CreateJobParams) {
 
     try {
       await tx.$executeRawUnsafe(
-        "UPDATE jobs SET sound_style = ? WHERE id = ?",
+        "UPDATE jobs SET sound_style = ?, subtitle_placement = ?, subtitle_size = ?, subtitle_margin_v = ?, blur_box_config = ?, voice_rate = ?, voice_pitch = ?, bg_music_volume = ?, gemini_api_key = ? WHERE id = ?",
         params.soundStyle ?? "cinematic_recap",
+        params.subtitlePlacement ?? "bottom",
+        params.subtitleSize ?? 1.0,
+        params.subtitleMarginV ?? null,
+        params.blurBoxConfig ?? null,
+        params.voiceRate ?? "+10%",
+        params.voicePitch ?? "-2Hz",
+        params.bgMusicVolume ?? 0.15,
+        params.geminiApiKey ?? null,
         job.id
       );
     } catch (rawErr) {
-      console.warn("Could not set sound_style via raw SQL:", rawErr);
+      console.warn("Could not set visual/audio settings via raw SQL:", rawErr);
     }
 
     await tx.jobEvent.create({

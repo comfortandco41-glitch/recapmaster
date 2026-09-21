@@ -14,6 +14,7 @@ import {
   AlertCircle,
   Radio,
   ExternalLink,
+  Key,
 } from "lucide-react";
 import { validateMediaUrl } from "@/lib/validation/url";
 
@@ -24,18 +25,24 @@ export function UrlInput() {
   const [language, setLanguage] = useState("my");
   const [voice, setVoice] = useState("default");
   const [soundStyle, setSoundStyle] = useState("cinematic_recap");
-  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(true);
+
+  // Audio Naturalness & Timing State
+  const [voiceRate, setVoiceRate] = useState("+10%");
+  const [voicePitch, setVoicePitch] = useState("-2Hz");
+  const [bgMusicVolume, setBgMusicVolume] = useState(0.15);
 
   // VoxCPM 2 Colab Endpoint State
   const [voxcpmEndpoint, setVoxcpmEndpoint] = useState("");
   const [voxcpmApiKey, setVoxcpmApiKey] = useState("");
+  const [geminiApiKey, setGeminiApiKey] = useState("");
   const [colabTestStatus, setColabTestStatus] = useState<"idle" | "testing" | "success" | "error">("idle");
   const [colabTestMessage, setColabTestMessage] = useState<string | null>(null);
 
   const [isLoading, setIsLoading] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
 
-  // Load saved Colab URL from localStorage
+  // Load saved configurations from localStorage
   useEffect(() => {
     try {
       const savedEndpoint = localStorage.getItem("promovie_voxcpm_endpoint");
@@ -45,6 +52,10 @@ export function UrlInput() {
       const savedKey = localStorage.getItem("promovie_voxcpm_apikey");
       if (savedKey) {
         setVoxcpmApiKey(savedKey);
+      }
+      const savedGeminiKey = localStorage.getItem("promovie_gemini_api_key");
+      if (savedGeminiKey) {
+        setGeminiApiKey(savedGeminiKey);
       }
     } catch {
       // Ignore localStorage read errors in private browsing
@@ -65,6 +76,13 @@ export function UrlInput() {
     setVoxcpmApiKey(val);
     try {
       localStorage.setItem("promovie_voxcpm_apikey", val);
+    } catch {}
+  };
+
+  const handleGeminiApiKeyChange = (val: string) => {
+    setGeminiApiKey(val);
+    try {
+      localStorage.setItem("promovie_gemini_api_key", val);
     } catch {}
   };
 
@@ -93,7 +111,7 @@ export function UrlInput() {
   async function testColabEndpoint() {
     if (!voxcpmEndpoint.trim()) {
       setColabTestStatus("error");
-      setColabTestMessage("Please enter your Google Colab endpoint URL first.");
+      setColabTestMessage("Please provide a valid Colab tunnel URL first.");
       return;
     }
 
@@ -101,7 +119,7 @@ export function UrlInput() {
     setColabTestMessage(null);
 
     try {
-      const res = await fetch("/api/voxcpm/test", {
+      const resp = await fetch("/api/worker/test-colab", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -110,8 +128,8 @@ export function UrlInput() {
         }),
       });
 
-      const data = await res.json();
-      if (data.success) {
+      const data = await resp.json();
+      if (resp.ok && data.success) {
         setColabTestStatus("success");
         setColabTestMessage(data.message || "Colab tunnel is active and responding.");
       } else {
@@ -154,6 +172,13 @@ export function UrlInput() {
           soundStyle,
           voxcpmEndpoint: voxcpmEndpoint.trim() || undefined,
           voxcpmApiKey: voxcpmApiKey.trim() || undefined,
+          geminiApiKey: geminiApiKey.trim() || undefined,
+          subtitlePlacement: "bottom",
+          subtitleSize: 1.0,
+          subtitleMarginV: 30,
+          voiceRate,
+          voicePitch,
+          bgMusicVolume: Number(bgMusicVolume),
           recap: true,
           consentConfirmed: true,
         }),
@@ -351,23 +376,73 @@ export function UrlInput() {
 
             <div>
               <label className="block text-xs text-zinc-400 mb-1">
-                Voice Model Preset
+                Voice Model Selection
               </label>
               <select
                 value={voice}
                 onChange={(e) => setVoice(e.target.value)}
                 className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-purple-500"
               >
-                <option value="default">VoxCPM 2 Default Narrator</option>
-                <option value="deep">Cinematic Deep Voice</option>
-                <option value="storyteller">Dynamic Storyteller</option>
-                <option value="studio">Clear Studio Voice</option>
+                <option value="default">VoxCPM 2 AI Voice (via Colab)</option>
+                <option value="my-MM-NilarNeural">Burmese Female - Nilar (Warm Studio Voice)</option>
+                <option value="my-MM-ThihaNeural">Burmese Male - Thiha (Clear Narration)</option>
+                <option value="en-US-ChristopherNeural">English - Christopher (Cinematic Male)</option>
               </select>
+            </div>
+
+            <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  Speech Pace / Rate
+                </label>
+                <select
+                  value={voiceRate}
+                  onChange={(e) => setVoiceRate(e.target.value)}
+                  className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200"
+                >
+                  <option value="+12%">⚡ Brisk & Energetic (+12%) - Recommended</option>
+                  <option value="+8%">✨ Natural Narration (+8%)</option>
+                  <option value="+0%">Normal (+0%)</option>
+                  <option value="-8%">Slow Storytelling (-8%)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">
+                  Vocal Pitch Tone
+                </label>
+                <select
+                  value={voicePitch}
+                  onChange={(e) => setVoicePitch(e.target.value)}
+                  className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-2.5 py-1.5 text-xs text-zinc-200"
+                >
+                  <option value="-4Hz">🎙️ Deep Cinematic Voice (-4Hz)</option>
+                  <option value="-2Hz">Natural Studio Pitch (-2Hz) - Default</option>
+                  <option value="+0Hz">Neutral (+0Hz)</option>
+                  <option value="+4Hz">Higher Pitch (+4Hz)</option>
+                </select>
+              </div>
+
+              <div>
+                <div className="flex justify-between text-xs text-zinc-400 mb-1">
+                  <span>Background Audio</span>
+                  <span className="text-zinc-300 font-mono">{Math.round(bgMusicVolume * 100)}%</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="0.4"
+                  step="0.05"
+                  value={bgMusicVolume}
+                  onChange={(e) => setBgMusicVolume(parseFloat(e.target.value))}
+                  className="w-full mt-2 accent-purple-500"
+                />
+              </div>
             </div>
 
             <div className="sm:col-span-2">
               <label className="block text-xs text-zinc-400 mb-1">
-                VoxCPM Sound Design & Audio Style
+                Sound Design & Audio Mastering Style
               </label>
               <select
                 value={soundStyle}
@@ -383,6 +458,33 @@ export function UrlInput() {
             </div>
 
             <div className="sm:col-span-2">
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-zinc-300 font-medium flex items-center gap-1.5">
+                  <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+                  Google Gemini API Key (Burmese Translation & Recap Narration)
+                </label>
+                <a
+                  href="https://aistudio.google.com/app/apikey"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[11px] text-purple-400 hover:text-purple-300 flex items-center gap-1 transition-colors"
+                >
+                  Get free key <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+              <input
+                type="password"
+                value={geminiApiKey}
+                onChange={(e) => handleGeminiApiKeyChange(e.target.value)}
+                placeholder="AIzaSy... (recommended for high accuracy Burmese subtitles & recap script)"
+                className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-purple-500 font-mono"
+              />
+              <p className="text-[11px] text-zinc-500 mt-1">
+                Powers Gemini 2.5/2.0 Flash for natural Burmese dialogue translation and engaging recap narration. If left blank, falls back to web translation.
+              </p>
+            </div>
+
+            <div className="sm:col-span-2">
               <label className="block text-xs text-zinc-400 mb-1">
                 Optional VoxCPM API Key (Authorization Header)
               </label>
@@ -393,6 +495,21 @@ export function UrlInput() {
                 placeholder="Leave blank if your Colab endpoint does not require an API key"
                 className="w-full rounded-lg bg-zinc-800 border border-zinc-700 px-3 py-2 text-xs text-zinc-200 focus:outline-none focus:border-purple-500 font-mono"
               />
+            </div>
+
+            {/* Inform user that Subtitle Typography & Logo Blur settings appear after voice & video are dubbed */}
+            <div className="sm:col-span-2 pt-3 border-t border-zinc-800/80">
+              <div className="rounded-xl bg-purple-950/20 border border-purple-500/20 p-3.5 flex items-start gap-3">
+                <Sparkles className="h-4 w-4 shrink-0 text-purple-400 mt-0.5" />
+                <div className="text-xs space-y-1">
+                  <p className="font-semibold text-purple-300">
+                    🎨 Subtitle Typography & 🛡️ Logo Watermark Blur Box
+                  </p>
+                  <p className="text-zinc-400 leading-relaxed">
+                    These visual layout controls will appear in the <strong>Studio Review Panel</strong> immediately after the voice and video are dubbed! You will be able to preview the exact video frame, adjust subtitle placement and remove any old logos before final video rendering.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         )}

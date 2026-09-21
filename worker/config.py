@@ -51,6 +51,10 @@ VOXCPM_ENDPOINT = os.environ.get("VOXCPM_ENDPOINT", "http://localhost:8000")
 VOXCPM_API_KEY = os.environ.get("VOXCPM_API_KEY", "")
 VOXCPM_TIMEOUT_SECONDS = int(os.environ.get("VOXCPM_TIMEOUT_SECONDS", "300"))
 
+# Gemini API Configuration for Translation & Scripting
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY", "")
+GEMINI_MODEL = (os.environ.get("GEMINI_MODEL") or "").strip()
+
 # Resource limits
 MAX_SOURCE_SIZE_MB = int(os.environ.get("MAX_SOURCE_SIZE_MB", "2000"))
 MAX_VIDEO_DURATION_SECONDS = int(os.environ.get("MAX_VIDEO_DURATION_SECONDS", "7200"))
