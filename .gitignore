@@ -47,6 +47,7 @@ prisma/*.db-journal
 __pycache__/
 *.pyc
 .agents/
+scratch/
 
 preview_temp/
 *.ttf

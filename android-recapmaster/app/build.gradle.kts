@@ -34,7 +34,7 @@ android {
 
         // Chaquopy Python configuration
         python {
-            version = "3.8"
+            buildPython("python3")
             pip {
                 install("yt-dlp")
             }
