@@ -102,7 +102,7 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // FFmpeg Kit with Full GPL (libass + freetype included for Burmese subtitles)
-    implementation("com.arthenica:ffmpeg-kit-full-gpl:6.0-2")
+    implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full-gpl:8.1.7")
 
     // OkHttp (Gemini REST API & Edge TTS WebSocket)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
