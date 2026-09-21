@@ -50,9 +50,27 @@ jobs:
           ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/26.1.10909125
         run: |
           cd android-recapmaster
-          ./gradlew assembleDebug --stacktrace --info
+          set -o pipefail
+          ./gradlew assembleDebug --stacktrace 2>&1 | tee ../build.log
+
+      - name: Dump Build Failure Summary
+        if: failure()
+        run: |
+          echo "### ❌ Gradle Build Error Log" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -n 120 build.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Build Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-build-log
+          path: build.log
+          retention-days: 7
 
       - name: Upload Debug APK Artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: RecapMaster-debug-apk

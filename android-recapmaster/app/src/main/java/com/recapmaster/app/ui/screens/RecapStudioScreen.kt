@@ -249,7 +249,7 @@ fun RecapStudioScreen(pipelineManager: RecapPipelineManager) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         Text("🎬 ${pipelineState.message}", color = Color(0xFFC084FC), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         LinearProgressIndicator(
-                            progress = pipelineState.progress,
+                            progress = { pipelineState.progress },
                             modifier = Modifier.fillMaxWidth().height(8.dp),
                             color = Color(0xFFA855F7),
                             trackColor = Color(0xFF312E81)
