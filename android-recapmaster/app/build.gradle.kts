@@ -31,14 +31,6 @@ android {
                 arguments.addAll(listOf("-DANDROID_STL=c++_shared"))
             }
         }
-
-        // Chaquopy Python configuration
-        python {
-            buildPython("python3")
-            pip {
-                install("yt-dlp")
-            }
-        }
     }
 
     buildTypes {
@@ -81,6 +73,15 @@ android {
         cmake {
             path = file("src/main/cpp/CMakeLists.txt")
             version = "3.22.1"
+        }
+    }
+}
+
+chaquopy {
+    defaultConfig {
+        version = "3.10"
+        pip {
+            install("yt-dlp")
         }
     }
 }
