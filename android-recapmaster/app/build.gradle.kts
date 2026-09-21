@@ -7,6 +7,7 @@ plugins {
 android {
     namespace = "com.recapmaster.app"
     compileSdk = 34
+    ndkVersion = "26.1.10909125"
 
     defaultConfig {
         applicationId = "com.recapmaster.app"

@@ -24,24 +24,30 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK & NDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android NDK & CMake
-        run: |
-          sdkmanager --install "ndk;26.1.10909125" "cmake;3.22.1"
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
 
       - name: Set up Python for Chaquopy
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
+      - name: Install Android NDK & CMake
+        run: |
+          echo "Accepting Android SDK licenses..."
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          echo "Installing NDK and CMake..."
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "ndk;26.1.10909125" "cmake;3.22.1" || true
+
       - name: Grant Execute Permission for Gradlew
         run: |
           cd android-recapmaster
-          chmod +x gradlew || true
+          chmod +x gradlew
 
       - name: Build Debug APK with Gradle
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+          ANDROID_NDK_HOME: /usr/local/lib/android/sdk/ndk/26.1.10909125
         run: |
           cd android-recapmaster
           ./gradlew assembleDebug --stacktrace
