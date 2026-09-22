@@ -217,8 +217,8 @@ APK artifact: RecapMaster-debug-apk (14-day retention)
 | UnsatisfiedLinkError | JNI library not found | Check CMakeLists.txt, NDK version, ABI |
 | SecurityException on gallery save | Missing storage permission | Add permission + use MediaStore API |
 | OutOfMemoryError on video | Large video loaded into heap | Stream via FFmpegKit, do not load bytes into RAM |
-| Gradle sync fails on chaquopy | Python version mismatch | Match version = "3.10" with CI Python version |
 | ModuleNotFoundError: yt_dlp | pip package not declared | Add install("yt-dlp") in chaquopy pip block |
+| Failed resolution of: Lcom/arthenica/smartexception/java/Exceptions; | FFmpegKit missing transitive smart-exception | Add com.arthenica:smart-exception-java and smart-exception-common jars to app/libs |
 
 ---
 

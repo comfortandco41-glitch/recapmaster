@@ -103,6 +103,9 @@ dependencies {
 
     // FFmpeg Kit with Full GPL (libass + freetype included for Burmese subtitles)
     implementation("dev.ffmpegkit-maintained:ffmpeg-kit-full-gpl:8.1.7")
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar"))))
+    implementation("com.arthenica:smart-exception-java:0.2.1")
+    implementation("com.arthenica:smart-exception-common:0.2.1")
 
     // OkHttp (Gemini REST API & Edge TTS WebSocket)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
