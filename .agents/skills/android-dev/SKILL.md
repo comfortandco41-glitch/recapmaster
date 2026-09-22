@@ -218,7 +218,7 @@ APK artifact: RecapMaster-debug-apk (14-day retention)
 | SecurityException on gallery save | Missing storage permission | Add permission + use MediaStore API |
 | OutOfMemoryError on video | Large video loaded into heap | Stream via FFmpegKit, do not load bytes into RAM |
 | ModuleNotFoundError: yt_dlp | pip package not declared | Add install("yt-dlp") in chaquopy pip block |
-| Failed resolution of: Lcom/arthenica/smartexception/java/Exceptions; | FFmpegKit missing transitive smart-exception | Add com.arthenica:smart-exception-java and smart-exception-common jars to app/libs |
+| Failed resolution of: Lcom/arthenica/smartexception/java/Exceptions; | FFmpegKit missing transitive smart-exception | Add com.arthenica:smart-exception-java and smart-exception-common dependencies to app/build.gradle.kts |
 
 ---
 
