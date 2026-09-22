@@ -46,7 +46,12 @@ prisma/*.db-journal
 
 __pycache__/
 *.pyc
-.agents/
+# Allow agent skills to be version-controlled; only ignore runtime/cache data
+.agents/**
+!.agents/skills/
+!.agents/skills/**
+!.agents/rules/
+!.agents/rules/**
 scratch/
 
 preview_temp/
