@@ -115,6 +115,9 @@ dependencies {
     // Media3 / ExoPlayer (In-App Video Preview)
     implementation("androidx.media3:media3-exoplayer:1.3.1")
     implementation("androidx.media3:media3-ui:1.3.1")
+    implementation("androidx.media3:media3-common:1.3.1")
+    // Compose animation (AnimatedVisibility)
+    implementation("androidx.compose.animation:animation:1.6.7")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

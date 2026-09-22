@@ -38,7 +38,8 @@ data class PipelineState(
     val progress: Float = 0.0f,
     val message: String = "Ready",
     val finalVideoUri: Uri? = null,
-    val error: String? = null
+    val error: String? = null,
+    val logLines: List<String> = emptyList()
 )
 
 class RecapPipelineManager(private val context: Context) {
@@ -51,15 +52,33 @@ class RecapPipelineManager(private val context: Context) {
     private val whisperEngine = WhisperEngine(context)
     private val edgeTtsClient = EdgeTtsClient()
 
+    private val logBuffer = mutableListOf<String>()
+
+    private fun log(msg: String, stage: PipelineStage? = null, progress: Float? = null) {
+        logBuffer.add(msg)
+        _state.value = _state.value.copy(
+            stage = stage ?: _state.value.stage,
+            progress = progress ?: _state.value.progress,
+            message = msg,
+            logLines = logBuffer.toList()
+        )
+    }
+
     suspend fun executePipeline(
         videoUrl: String,
         geminiApiKey: String,
         voiceName: String = "my-MM-ThihaNeural",
-        playbackSpeed: Float = 1.0f,
-        blurBox: BlurBoxConfig = BlurBoxConfig(),
+        soundStyle: String = "cinematic_recap",
+        burnSubtitles: Boolean = true,
         subtitlePlacement: String = "bottom",
-        fontScale: Float = 1.0f
+        fontScale: Float = 1.0f,
+        marginV: Int = 30,
+        playbackSpeed: Float = 1.0f,
+        blurBox: BlurBoxConfig = BlurBoxConfig()
     ) = withContext(Dispatchers.IO) {
+        logBuffer.clear()
+        _state.value = PipelineState()
+
         val workDir = File(context.cacheDir, "job_${System.currentTimeMillis()}").apply { mkdirs() }
         val sourceVideo = File(workDir, "source.mp4")
         val extractedAudio = File(workDir, "audio_16k.wav")
@@ -68,95 +87,109 @@ class RecapPipelineManager(private val context: Context) {
         val finalVideo = File(workDir, "final_recap.mp4")
 
         try {
-            // Stage 1: Download YouTube or Bilibili video
-            updateState(PipelineStage.DOWNLOADING, 0.15f, "Downloading video from URL...")
+            // Stage 1: Download
+            log("📥 [1/6] Downloading video from URL...", PipelineStage.DOWNLOADING, 0.05f)
             val downloadRes = downloader.downloadUrl(videoUrl, sourceVideo)
+            log("✅ Downloaded: ${downloadRes.title} (${downloadRes.durationSeconds.toInt()}s)", progress = 0.18f)
 
-            // Stage 2: Audio Extraction for Whisper
-            updateState(PipelineStage.EXTRACTING_AUDIO, 0.30f, "Extracting speech audio for transcription...")
+            // Stage 2: Audio Extraction
+            log("🎙️ [2/6] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, 0.22f)
             ffmpegEngine.extractSpeechAudio(downloadRes.localFile, extractedAudio)
+            log("✅ Audio extracted (16kHz mono PCM)", progress = 0.32f)
 
             // Stage 3: On-Device Whisper Transcription
-            updateState(PipelineStage.TRANSCRIBING, 0.45f, "Transcribing dialogue on-device with Whisper...")
+            log("🧠 [3/6] Transcribing dialogue on-device with Whisper...", PipelineStage.TRANSCRIBING, 0.35f)
             val modelFile = ensureWhisperModel()
             whisperEngine.loadModel(modelFile)
             val transcriptJson = whisperEngine.transcribeWav(extractedAudio, language = "auto")
             whisperEngine.release()
+            log("✅ Transcription complete", progress = 0.50f)
 
             // Stage 4: Gemini Burmese Translation & Recap Script
-            updateState(PipelineStage.TRANSLATING_SCRIPT, 0.60f, "Translating & generating Burmese movie recap narration...")
+            log("🌏 [4/6] Translating & generating Burmese recap narration via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
             val narrationScript = geminiClient.generateRecapScript(burmeseTranscript)
+            log("✅ Burmese recap script generated", progress = 0.65f)
 
-            // Stage 5: Edge TTS Burmese Voice Dubbing
-            updateState(PipelineStage.DUBBING_VOICE, 0.75f, "Synthesizing Burmese narration voiceover ($voiceName)...")
+            // Stage 5: Edge TTS Voice Dubbing
+            log("🔊 [5/6] Synthesizing Burmese voice ($voiceName) via Edge TTS...", PipelineStage.DUBBING_VOICE, 0.68f)
             edgeTtsClient.synthesizeSpeech(
                 text = narrationScript,
                 outputFile = voiceAudio,
-                voiceName = voiceName
+                voiceName = voiceName,
+                rate = "+10%",
+                pitch = "-2Hz"
             )
+            log("✅ Voice narration synthesized", progress = 0.78f)
 
             // Subtitle Generation (.ass)
             val fontsDir = File(context.filesDir, "fonts").apply { mkdirs() }
             ensurePadaukFont(fontsDir)
-            SubtitleGenerator.generateAssFile(
-                transcriptJson = burmeseTranscript,
-                outputAssFile = assSubtitles,
-                placement = subtitlePlacement,
-                fontScale = fontScale
-            )
+            val assFileToUse: File? = if (burnSubtitles) {
+                SubtitleGenerator.generateAssFile(
+                    transcriptJson = burmeseTranscript,
+                    outputAssFile = assSubtitles,
+                    placement = subtitlePlacement,
+                    fontScale = fontScale,
+                    marginV = marginV
+                )
+            } else null
 
-            // Stage 6: Video Composition (Pure Dubbed Audio + Blur + Speed + Subtitles)
-            updateState(PipelineStage.COMPOSING_VIDEO, 0.90f, "Composing final video with visual effects & pure dubbed audio...")
+            // Stage 6: Video Composition
+            log("🎬 [6/6] Composing final video with ${soundStyle.replace("_", " ")} audio style...", PipelineStage.COMPOSING_VIDEO, 0.82f)
             ffmpegEngine.renderFinalRecap(
                 sourceVideo = downloadRes.localFile,
                 dubbedVoiceAudio = voiceAudio,
-                assSubtitleFile = assSubtitles,
+                assSubtitleFile = assFileToUse,
                 outputVideo = finalVideo,
                 playbackSpeed = playbackSpeed,
                 blurBox = blurBox,
-                fontsDir = fontsDir
+                fontsDir = fontsDir,
+                soundStyle = soundStyle
             )
+            log("✅ Video composed successfully", progress = 0.96f)
 
-            // Save to Public Android Gallery / Movies folder
+            // Save to Gallery
             val savedUri = exportToGallery(finalVideo, "recap_${System.currentTimeMillis()}.mp4")
-
-            // Automatic Post-Download Cleanup: delete source video and temp workDir
             workDir.deleteRecursively()
 
+            logBuffer.add("🎉 Done! Saved to Movies/RecapMaster/")
             _state.value = PipelineState(
                 stage = PipelineStage.COMPLETED,
                 progress = 1.0f,
-                message = "✅ Video rendered and saved to Gallery! Source & temporary files purged.",
-                finalVideoUri = savedUri
+                message = "✅ Recap video saved to Gallery!",
+                finalVideoUri = savedUri,
+                logLines = logBuffer.toList()
             )
 
         } catch (e: Exception) {
             workDir.deleteRecursively()
+            val errMsg = e.message ?: e.javaClass.simpleName
+            logBuffer.add("❌ Error: $errMsg")
             _state.value = PipelineState(
                 stage = PipelineStage.FAILED,
                 progress = 0f,
-                message = "Failed: ${e.message}",
-                error = e.localizedMessage ?: "Unknown error"
+                message = "Failed at stage: ${_state.value.stage.name}",
+                error = errMsg,
+                logLines = logBuffer.toList()
             )
         }
     }
 
-    private fun updateState(stage: PipelineStage, progress: Float, msg: String) {
-        _state.value = PipelineState(stage = stage, progress = progress, message = msg)
+    fun reset() {
+        logBuffer.clear()
+        _state.value = PipelineState()
     }
 
     private fun ensureWhisperModel(): File {
         val modelFile = File(context.filesDir, "ggml-tiny.bin")
         if (!modelFile.exists() || modelFile.length() < 1000) {
-            // Check if bundled in assets
             try {
                 context.assets.open("models/ggml-tiny.bin").use { input ->
                     FileOutputStream(modelFile).use { output -> input.copyTo(output) }
                 }
             } catch (e: Exception) {
-                // If not pre-bundled in APK assets, download tiny model on first run
                 val modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
                 val connection = java.net.URL(modelUrl).openConnection()
                 connection.getInputStream().use { input ->
@@ -196,9 +229,7 @@ class RecapPipelineManager(private val context: Context) {
 
         resolver.openOutputStream(uri).use { outStream ->
             if (outStream == null) throw RuntimeException("Could not open output stream to gallery")
-            FileInputStream(videoFile).use { inStream ->
-                inStream.copyTo(outStream)
-            }
+            FileInputStream(videoFile).use { inStream -> inStream.copyTo(outStream) }
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
