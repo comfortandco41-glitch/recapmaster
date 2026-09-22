@@ -14,7 +14,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -27,10 +26,10 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.viewinterop.AndroidView
+import com.recapmaster.app.PipelineParams
 import com.recapmaster.app.engine.BlurBoxConfig
 import com.recapmaster.app.pipeline.PipelineStage
 import com.recapmaster.app.pipeline.RecapPipelineManager
-import kotlinx.coroutines.launch
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 private val BgDeep       = Color(0xFF09090B)
@@ -73,9 +72,11 @@ private val BLUR_PRESETS = listOf(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RecapStudioScreen(pipelineManager: RecapPipelineManager) {
+fun RecapStudioScreen(
+    pipelineManager: RecapPipelineManager,
+    onStartPipeline: (PipelineParams) -> Unit = {}
+) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val pipelineState by pipelineManager.state.collectAsState()
 
     // ── Input state ───────────────────────────────────────────────────────────
@@ -107,9 +108,15 @@ fun RecapStudioScreen(pipelineManager: RecapPipelineManager) {
     // Speed
     var playbackSpeed  by remember { mutableFloatStateOf(1.0f) }
 
-    // ExoPlayer for inline preview
-    val exoPlayer = remember { ExoPlayer.Builder(context).build() }
-    DisposableEffect(Unit) { onDispose { exoPlayer.release() } }
+    // ExoPlayer for inline preview (safely initialized)
+    val exoPlayer = remember {
+        try {
+            ExoPlayer.Builder(context).build()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+    DisposableEffect(Unit) { onDispose { exoPlayer?.release() } }
 
     val isProcessing = pipelineState.stage != PipelineStage.IDLE &&
             pipelineState.stage != PipelineStage.COMPLETED &&
@@ -408,24 +415,29 @@ fun RecapStudioScreen(pipelineManager: RecapPipelineManager) {
             // ── Generate Button ────────────────────────────────────────────
             Button(
                 onClick = {
-                    scope.launch {
-                        pipelineManager.executePipeline(
-                            videoUrl = urlInput.trim(),
-                            geminiApiKey = geminiKey.trim(),
-                            voiceName = selectedVoice,
-                            soundStyle = soundStyle.value,
-                            burnSubtitles = burnSubtitles,
-                            subtitlePlacement = subtitlePlacement,
-                            fontScale = fontScale,
-                            marginV = marginV,
-                            playbackSpeed = playbackSpeed,
-                            blurBox = BlurBoxConfig(
-                                enabled = blurEnabled,
-                                xPct = blurX, yPct = blurY,
-                                wPct = blurW, hPct = blurH,
-                                strength = blurStrength
+                    // Delegate to MainActivity which starts the ForegroundService.
+                    // Heavy work (download, Whisper, FFmpegKit) MUST NOT run in
+                    // rememberCoroutineScope — Android 14 kills it when backgrounded.
+                    try {
+                        onStartPipeline(
+                            PipelineParams(
+                                url           = urlInput.trim(),
+                                geminiKey     = geminiKey.trim(),
+                                voice         = selectedVoice,
+                                soundStyle    = soundStyle.value,
+                                burnSubtitles = burnSubtitles,
+                                subPlacement  = subtitlePlacement,
+                                fontScale     = fontScale,
+                                marginV       = marginV,
+                                speed         = playbackSpeed,
+                                blurEnabled   = blurEnabled,
+                                blurX         = blurX, blurY = blurY,
+                                blurW         = blurW, blurH = blurH,
+                                blurStrength  = blurStrength
                             )
                         )
+                    } catch (t: Throwable) {
+                        t.printStackTrace()
                     }
                 },
                 enabled = !isProcessing && urlInput.isNotBlank() && geminiKey.isNotBlank(),
@@ -480,23 +492,27 @@ fun RecapStudioScreen(pipelineManager: RecapPipelineManager) {
                         }
 
                         // Inline ExoPlayer video preview
-                        pipelineState.finalVideoUri?.let { uri ->
-                            LaunchedEffect(uri) {
-                                exoPlayer.setMediaItem(MediaItem.fromUri(uri))
-                                exoPlayer.prepare()
+                        if (exoPlayer != null) {
+                            pipelineState.finalVideoUri?.let { uri ->
+                                LaunchedEffect(uri) {
+                                    try {
+                                        exoPlayer.setMediaItem(MediaItem.fromUri(uri))
+                                        exoPlayer.prepare()
+                                    } catch (_: Throwable) {}
+                                }
+                                AndroidView(
+                                    factory = { ctx ->
+                                        PlayerView(ctx).apply {
+                                            player = exoPlayer
+                                            useController = true
+                                        }
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(220.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                )
                             }
-                            AndroidView(
-                                factory = { ctx ->
-                                    PlayerView(ctx).apply {
-                                        player = exoPlayer
-                                        useController = true
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(220.dp)
-                                    .clip(RoundedCornerShape(12.dp))
-                            )
                         }
 
                         Text(

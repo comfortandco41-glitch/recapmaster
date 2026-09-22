@@ -1,6 +1,8 @@
 package com.recapmaster.app.data.downloader
 
+import android.content.Context
 import com.chaquo.python.Python
+import com.chaquo.python.android.AndroidPlatform
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -12,9 +14,16 @@ data class DownloadResult(
     val localFile: File
 )
 
-class UrlDownloader {
+class UrlDownloader(private val context: Context? = null) {
 
     suspend fun downloadUrl(url: String, targetFile: File): DownloadResult = withContext(Dispatchers.IO) {
+        if (!Python.isStarted()) {
+            if (context != null) {
+                Python.start(AndroidPlatform(context))
+            } else {
+                throw IllegalStateException("Python runtime is not initialized. Please restart the app.")
+            }
+        }
         val py = Python.getInstance()
         val module = py.getModule("yt_downloader")
         val jsonStr = module.callAttr("download_video", url, targetFile.absolutePath).toString()

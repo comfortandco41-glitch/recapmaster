@@ -47,7 +47,7 @@ class RecapPipelineManager(private val context: Context) {
     private val _state = MutableStateFlow(PipelineState())
     val state: StateFlow<PipelineState> = _state
 
-    private val downloader = UrlDownloader()
+    private val downloader = UrlDownloader(context)
     private val ffmpegEngine = FFmpegEngine(context)
     private val whisperEngine = WhisperEngine(context)
     private val edgeTtsClient = EdgeTtsClient()
@@ -163,7 +163,7 @@ class RecapPipelineManager(private val context: Context) {
                 logLines = logBuffer.toList()
             )
 
-        } catch (e: Exception) {
+        } catch (e: Throwable) {
             workDir.deleteRecursively()
             val errMsg = e.message ?: e.javaClass.simpleName
             logBuffer.add("❌ Error: $errMsg")
@@ -191,8 +191,12 @@ class RecapPipelineManager(private val context: Context) {
                 }
             } catch (e: Exception) {
                 val modelUrl = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-tiny.bin"
-                val connection = java.net.URL(modelUrl).openConnection()
-                connection.getInputStream().use { input ->
+                val connection = (java.net.URL(modelUrl).openConnection() as java.net.HttpURLConnection).apply {
+                    connectTimeout = 30000
+                    readTimeout = 120000
+                    instanceFollowRedirects = true
+                }
+                connection.inputStream.use { input ->
                     FileOutputStream(modelFile).use { output -> input.copyTo(output) }
                 }
             }

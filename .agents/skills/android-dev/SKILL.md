@@ -1,4 +1,4 @@
-﻿---
+---
 name: android-dev
 description: >-
   Android development skill for the RecapMaster project. Use when the user
@@ -130,9 +130,17 @@ FFmpegKit.executeAsync(cmd) { session ->
 
 Required permissions in AndroidManifest.xml:
 - READ_EXTERNAL_STORAGE / WRITE_EXTERNAL_STORAGE (API < 29)
-- READ_MEDIA_VIDEO (API >= 33)
-- INTERNET
-- FOREGROUND_SERVICE (if pipeline runs as foreground service)
+- READ_MEDIA_VIDEO / READ_MEDIA_IMAGES (API >= 33)
+- INTERNET & ACCESS_NETWORK_STATE
+- FOREGROUND_SERVICE & FOREGROUND_SERVICE_DATA_SYNC (API >= 34)
+- POST_NOTIFICATIONS (API >= 33)
+- largeHeap="true" on <application>
+
+Pipeline Execution:
+The entire pipeline runs inside `RecapPipelineService` (foreground service with
+`foregroundServiceType="dataSync"` and `ServiceCompat.startForeground`).
+All pipeline stages must catch `Throwable` (not just `Exception`) to prevent
+native `UnsatisfiedLinkError` or `OutOfMemoryError` from terminating the process.
 
 For gallery export, always use MediaStore API (never direct /sdcard paths).
 The exportToGallery() method handles this with IS_PENDING flag on Android Q+.
