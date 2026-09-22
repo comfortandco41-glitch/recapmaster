@@ -61,7 +61,32 @@ def download_source(job_id: str, url: str) -> Path:
     )
 
     clean_url = clean_media_url(url)
-    ffmpeg_dir = str(Path(FFMPEG_BIN).parent)
+
+    # Determine if ffmpeg is actually available (FFMPEG_BIN falls back to plain
+    # "ffmpeg" string when not found – check it's a real, resolvable binary).
+    ffmpeg_available = (
+        FFMPEG_BIN != "ffmpeg" and Path(FFMPEG_BIN).is_file()
+    ) or bool(shutil.which("ffmpeg"))
+
+    # Format selector:
+    #   - When ffmpeg IS available: prefer best video+audio merged into mp4.
+    #   - When ffmpeg is NOT available: only select pre-merged single-file
+    #     formats so yt-dlp never needs to invoke ffmpeg for muxing.
+    if ffmpeg_available:
+        fmt = (
+            "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]"
+            "/bestvideo[height<=1080]+bestaudio"
+            "/bestvideo*+bestaudio"
+            "/best[ext=mp4]/best"
+        )
+    else:
+        # No ffmpeg – fall back to a single pre-merged file only
+        fmt = (
+            "best[ext=mp4][height<=1080]"
+            "/best[ext=mp4]"
+            "/best[height<=1080]"
+            "/best"
+        )
 
     # Safe argument array without shell concatenation
     cmd = [
@@ -69,13 +94,18 @@ def download_source(job_id: str, url: str) -> Path:
         "-m", "yt_dlp",
         "--no-playlist",
         "--no-warnings",
-        "--ffmpeg-location", ffmpeg_dir,
         "--max-filesize", f"{MAX_SOURCE_SIZE_MB}m",
         "--extractor-args", "youtube:player_client=ios,android,web",
-        "-f", "bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/bestvideo*+bestaudio/best[ext=mp4]/best",
-        "--merge-output-format", "mp4",
+        "-f", fmt,
         "-o", str(target_file),
     ]
+
+    # Only pass --ffmpeg-location and --merge-output-format when ffmpeg exists
+    if ffmpeg_available:
+        ffmpeg_dir = str(Path(FFMPEG_BIN).parent) if FFMPEG_BIN != "ffmpeg" else ""
+        if ffmpeg_dir:
+            cmd.extend(["--ffmpeg-location", ffmpeg_dir])
+        cmd.extend(["--merge-output-format", "mp4"])
 
     if shutil.which("node"):
         cmd.extend(["--js-runtimes", "node"])
