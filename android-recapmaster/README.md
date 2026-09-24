@@ -1,6 +1,6 @@
 # RecapMaster Android AI Studio
 
-Standalone Android mobile application that executes the complete movie recap pipeline directly on-device with **on-device Whisper**, **on-device FFmpeg**, **embedded Python yt-dlp (Chaquopy)**, **Gemini Flash translation**, and **Microsoft Edge TTS Burmese dubbing**.
+Standalone Android mobile application that executes the complete movie recap pipeline directly on-device with **on-device Whisper**, **on-device FFmpeg**, **embedded Python yt-dlp (Chaquopy)**, **Gemini Flash translation**, **Google Gemini AI Voice & Edge TTS Burmese dubbing**, and **Voice Profiles**.
 
 ---
 
@@ -11,7 +11,8 @@ Standalone Android mobile application that executes the complete movie recap pip
 | **YouTube & Bilibili Downloader** | `yt-dlp` via **Chaquopy** (`com.chaquo.python`) | On-Device Python |
 | **Speech Recognition** | **whisper.cpp** via Android NDK / JNI (`libwhisper.so`) | 100% Offline On-Device CPU (NEON) |
 | **Translation & Script** | **Google Gemini Flash REST API** | Cloud HTTPS |
-| **Burmese Voice Dubbing** | **Microsoft Edge TTS** (`my-MM-ThihaNeural`, `my-MM-NilarNeural`) | Cloud WebSocket |
+| **Burmese Voice Dubbing** | **Google Gemini AI Voice (API Key)** + **Microsoft Edge TTS** + **Google Cloud TTS** | Cloud REST / WebSocket |
+| **Voice Profiles & Audition** | Curated persona profiles (Thiha, Nilar, Charon, Puck, Kore, Fenrir, Aoede) + In-App Audio Audition | Dynamic In-App |
 | **Video Composition** | **FFmpeg-Kit Full GPL** (`libass` + Padauk font) | On-Device GPU/CPU |
 | **Audio Isolation** | Stream mapping `-map 1:a:0` / `[1:a]atempo` | **100% Pure Dubbed Narration Only** (0:a excluded) |
 | **Post-Download Cleanup** | Android Scoped Storage (`MediaStore.Video`) | Auto-clears source & temp cache |
@@ -25,7 +26,7 @@ Standalone Android mobile application that executes the complete movie recap pip
 1. Push this repository to your GitHub account (public or private):
    ```bash
    git add .
-   git commit -m "Add RecapMaster Android application"
+   git commit -m "Add RecapMaster Android application with Gemini TTS & Voice Profiles"
    git push origin main
    ```
 2. Navigate to your repository on **GitHub** > **Actions** tab.
@@ -54,7 +55,19 @@ Standalone Android mobile application that executes the complete movie recap pip
 ## Features on Mobile
 - 🔗 **YouTube & Bilibili URL Downloader**: Paste any link or share directly from the YouTube/Bilibili app using the Android Share menu.
 - 🎙️ **On-Device Whisper**: Transcribes dialogue directly on your phone's processor with quantized GGUF weights.
-- 🇲🇲 **Natural Burmese Dubbing**: Uses Microsoft Edge neural voices with zero robotic cadence.
+- 🤖 **Gemini AI Voice TTS (using Gemini API Key)**: Uses Gemini 2.5/2.0 Flash native multimodal audio synthesis with emotional, cinematic narrator cadence.
+- 🇲🇲 **Microsoft Edge TTS & Google Cloud TTS**: Fast, free Edge neural dubbing (Thiha & Nilar) plus Google Cloud TTS options.
+- 🎭 **Curated Voice Profiles**:
+  - **Thiha (သီဟ)**: Burmese Male • Fast-paced cinematic recap
+  - **Nilar (နီလာ)**: Burmese Female • Expressive drama & suspense
+  - **Gemini Charon (ချာရွန်)**: Gemini AI • Deep thriller & gritty narration
+  - **Gemini Puck (ပတ်ခ်)**: Gemini AI • Punchy action & anime cadence
+  - **Gemini Kore (ကိုရီ)**: Gemini AI • Warm & captivating emotional storyteller
+  - **Gemini Fenrir (ဖန်ရီယာ)**: Gemini AI • Authoritative blockbuster presence
+  - **Gemini Aoede (အေးဒီး)**: Gemini AI • Melodic mystery & horror
+  - **Google Standard**: Google Cloud Burmese neural voice
+- 🔊 **In-App Voice Preview / Audition**: Listen to sample audio of any voice profile directly in the app before starting full video generation.
+- 🎛️ **Voice Speed, Pitch & Persona Tuning**: Adjust speech rate (-30% to +50%), pitch (-10Hz to +10Hz), and enter custom Gemini voice persona instructions.
 - ⚡ **Linked Playback Speed (0.5× – 2.0×)**: Video pacing and dubbed voice stretch synchronously.
 - 🛡️ **Watermark & Logo Blur Box**: Interactive sliders to obscure source channel logos or burned hardcoded subtitles.
 - 💾 **Auto Cleanup**: Saves final video directly to phone Gallery (`Movies/RecapMaster`) and automatically deletes the downloaded YouTube/Bilibili source file to free up device storage.

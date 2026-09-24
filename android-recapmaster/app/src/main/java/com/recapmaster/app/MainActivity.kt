@@ -61,22 +61,27 @@ class MainActivity : ComponentActivity() {
 
     private fun startPipelineSafely(params: PipelineParams) {
         val serviceIntent = RecapPipelineService.buildStartIntent(
-            context       = this,
-            url           = params.url,
-            geminiKey     = params.geminiKey,
-            voice         = params.voice,
-            soundStyle    = params.soundStyle,
-            burnSubtitles = params.burnSubtitles,
-            subPlacement  = params.subPlacement,
-            fontScale     = params.fontScale,
-            marginV       = params.marginV,
-            speed         = params.speed,
-            blurEnabled   = params.blurEnabled,
-            blurX         = params.blurX,
-            blurY         = params.blurY,
-            blurW         = params.blurW,
-            blurH         = params.blurH,
-            blurStrength  = params.blurStrength
+            context          = this,
+            url              = params.url,
+            geminiKey        = params.geminiKey,
+            voiceProfileId   = params.voiceProfileId,
+            ttsEngine        = params.ttsEngine,
+            voice            = params.voice,
+            rate             = params.voiceRate,
+            pitch            = params.voicePitch,
+            voicePrompt      = params.voicePrompt,
+            soundStyle       = params.soundStyle,
+            burnSubtitles    = params.burnSubtitles,
+            subPlacement     = params.subPlacement,
+            fontScale        = params.fontScale,
+            marginV          = params.marginV,
+            speed            = params.speed,
+            blurEnabled      = params.blurEnabled,
+            blurX            = params.blurX,
+            blurY            = params.blurY,
+            blurW            = params.blurW,
+            blurH            = params.blurH,
+            blurStrength     = params.blurStrength
         )
 
         try {
@@ -90,10 +95,18 @@ class MainActivity : ComponentActivity() {
             // Robust fallback to in-process coroutine if system restricts foreground service
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
+                    val baseProfile = com.recapmaster.app.data.model.VoiceProfiles.findById(params.voiceProfileId)
+                    val resolvedProfile = baseProfile.copy(
+                        voiceId = if (params.voice.isNotBlank()) params.voice else baseProfile.voiceId,
+                        rate = if (params.voiceRate.isNotBlank()) params.voiceRate else baseProfile.rate,
+                        pitch = if (params.voicePitch.isNotBlank()) params.voicePitch else baseProfile.pitch,
+                        promptPersona = if (params.voicePrompt.isNotBlank()) params.voicePrompt else baseProfile.promptPersona
+                    )
+
                     pipelineManager.executePipeline(
                         videoUrl          = params.url,
                         geminiApiKey      = params.geminiKey,
-                        voiceName         = params.voice,
+                        voiceProfile      = resolvedProfile,
                         soundStyle        = params.soundStyle,
                         burnSubtitles     = params.burnSubtitles,
                         subtitlePlacement = params.subPlacement,
@@ -164,7 +177,12 @@ class MainActivity : ComponentActivity() {
 data class PipelineParams(
     val url: String,
     val geminiKey: String,
-    val voice: String,
+    val voiceProfileId: String = "edge_thiha_cinematic",
+    val ttsEngine: String = "edge",
+    val voice: String = "my-MM-ThihaNeural",
+    val voiceRate: String = "+0%",
+    val voicePitch: String = "+0Hz",
+    val voicePrompt: String = "",
     val soundStyle: String,
     val burnSubtitles: Boolean,
     val subPlacement: String,

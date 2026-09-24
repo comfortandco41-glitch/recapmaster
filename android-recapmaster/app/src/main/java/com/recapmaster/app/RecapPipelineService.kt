@@ -11,6 +11,9 @@ import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
+import com.recapmaster.app.data.model.TtsEngine
+import com.recapmaster.app.data.model.VoiceProfile
+import com.recapmaster.app.data.model.VoiceProfiles
 import com.recapmaster.app.engine.BlurBoxConfig
 import com.recapmaster.app.pipeline.RecapPipelineManager
 import kotlinx.coroutines.CoroutineScope
@@ -37,7 +40,12 @@ class RecapPipelineService : Service() {
 
         const val EXTRA_URL             = "url"
         const val EXTRA_GEMINI_KEY      = "gemini_key"
+        const val EXTRA_VOICE_PROFILE_ID = "voice_profile_id"
+        const val EXTRA_TTS_ENGINE      = "tts_engine"
         const val EXTRA_VOICE           = "voice"
+        const val EXTRA_VOICE_RATE      = "voice_rate"
+        const val EXTRA_VOICE_PITCH     = "voice_pitch"
+        const val EXTRA_VOICE_PROMPT    = "voice_prompt"
         const val EXTRA_SOUND_STYLE     = "sound_style"
         const val EXTRA_BURN_SUBS       = "burn_subtitles"
         const val EXTRA_SUB_PLACEMENT   = "sub_placement"
@@ -55,7 +63,12 @@ class RecapPipelineService : Service() {
             context: Context,
             url: String,
             geminiKey: String,
+            voiceProfileId: String,
+            ttsEngine: String,
             voice: String,
+            rate: String,
+            pitch: String,
+            voicePrompt: String,
             soundStyle: String,
             burnSubtitles: Boolean,
             subPlacement: String,
@@ -66,21 +79,26 @@ class RecapPipelineService : Service() {
             blurX: Float, blurY: Float, blurW: Float, blurH: Float, blurStrength: Int
         ) = Intent(context, RecapPipelineService::class.java).apply {
             action = ACTION_START
-            putExtra(EXTRA_URL,           url)
-            putExtra(EXTRA_GEMINI_KEY,    geminiKey)
-            putExtra(EXTRA_VOICE,         voice)
-            putExtra(EXTRA_SOUND_STYLE,   soundStyle)
-            putExtra(EXTRA_BURN_SUBS,     burnSubtitles)
-            putExtra(EXTRA_SUB_PLACEMENT, subPlacement)
-            putExtra(EXTRA_FONT_SCALE,    fontScale)
-            putExtra(EXTRA_MARGIN_V,      marginV)
-            putExtra(EXTRA_SPEED,         speed)
-            putExtra(EXTRA_BLUR_ENABLED,  blurEnabled)
-            putExtra(EXTRA_BLUR_X,        blurX)
-            putExtra(EXTRA_BLUR_Y,        blurY)
-            putExtra(EXTRA_BLUR_W,        blurW)
-            putExtra(EXTRA_BLUR_H,        blurH)
-            putExtra(EXTRA_BLUR_STRENGTH, blurStrength)
+            putExtra(EXTRA_URL,              url)
+            putExtra(EXTRA_GEMINI_KEY,       geminiKey)
+            putExtra(EXTRA_VOICE_PROFILE_ID, voiceProfileId)
+            putExtra(EXTRA_TTS_ENGINE,       ttsEngine)
+            putExtra(EXTRA_VOICE,            voice)
+            putExtra(EXTRA_VOICE_RATE,       rate)
+            putExtra(EXTRA_VOICE_PITCH,      pitch)
+            putExtra(EXTRA_VOICE_PROMPT,     voicePrompt)
+            putExtra(EXTRA_SOUND_STYLE,      soundStyle)
+            putExtra(EXTRA_BURN_SUBS,        burnSubtitles)
+            putExtra(EXTRA_SUB_PLACEMENT,    subPlacement)
+            putExtra(EXTRA_FONT_SCALE,       fontScale)
+            putExtra(EXTRA_MARGIN_V,         marginV)
+            putExtra(EXTRA_SPEED,            speed)
+            putExtra(EXTRA_BLUR_ENABLED,     blurEnabled)
+            putExtra(EXTRA_BLUR_X,           blurX)
+            putExtra(EXTRA_BLUR_Y,           blurY)
+            putExtra(EXTRA_BLUR_W,           blurW)
+            putExtra(EXTRA_BLUR_H,           blurH)
+            putExtra(EXTRA_BLUR_STRENGTH,    blurStrength)
         }
     }
 
@@ -112,7 +130,12 @@ class RecapPipelineService : Service() {
             ACTION_START -> {
                 val url           = intent.getStringExtra(EXTRA_URL) ?: ""
                 val geminiKey     = intent.getStringExtra(EXTRA_GEMINI_KEY) ?: ""
+                val profileId     = intent.getStringExtra(EXTRA_VOICE_PROFILE_ID) ?: "edge_thiha_cinematic"
+                val ttsEngineStr  = intent.getStringExtra(EXTRA_TTS_ENGINE) ?: ""
                 val voice         = intent.getStringExtra(EXTRA_VOICE) ?: "my-MM-ThihaNeural"
+                val rate          = intent.getStringExtra(EXTRA_VOICE_RATE) ?: "+0%"
+                val pitch         = intent.getStringExtra(EXTRA_VOICE_PITCH) ?: "+0Hz"
+                val promptPersona = intent.getStringExtra(EXTRA_VOICE_PROMPT) ?: ""
                 val soundStyle    = intent.getStringExtra(EXTRA_SOUND_STYLE) ?: "cinematic_recap"
                 val burnSubs      = intent.getBooleanExtra(EXTRA_BURN_SUBS, true)
                 val subPlacement  = intent.getStringExtra(EXTRA_SUB_PLACEMENT) ?: "bottom"
@@ -131,6 +154,22 @@ class RecapPipelineService : Service() {
                     return START_NOT_STICKY
                 }
 
+                // Resolve VoiceProfile
+                val baseProfile = VoiceProfiles.findById(profileId)
+                val resolvedEngine = when (ttsEngineStr) {
+                    TtsEngine.GEMINI_VOICE.id -> TtsEngine.GEMINI_VOICE
+                    TtsEngine.GOOGLE_CLOUD_TTS.id -> TtsEngine.GOOGLE_CLOUD_TTS
+                    TtsEngine.EDGE_TTS.id -> TtsEngine.EDGE_TTS
+                    else -> baseProfile.engine
+                }
+                val activeProfile = baseProfile.copy(
+                    engine = resolvedEngine,
+                    voiceId = if (voice.isNotBlank()) voice else baseProfile.voiceId,
+                    rate = if (rate.isNotBlank()) rate else baseProfile.rate,
+                    pitch = if (pitch.isNotBlank()) pitch else baseProfile.pitch,
+                    promptPersona = if (promptPersona.isNotBlank()) promptPersona else baseProfile.promptPersona
+                )
+
                 // Collect pipeline state updates to reflect progress in foreground notification
                 progressJob?.cancel()
                 progressJob = serviceScope.launch {
@@ -147,7 +186,7 @@ class RecapPipelineService : Service() {
                         pipelineManager.executePipeline(
                             videoUrl          = url,
                             geminiApiKey      = geminiKey,
-                            voiceName         = voice,
+                            voiceProfile      = activeProfile,
                             soundStyle        = soundStyle,
                             burnSubtitles     = burnSubs,
                             subtitlePlacement = subPlacement,

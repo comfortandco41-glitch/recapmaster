@@ -22,14 +22,20 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.net.Uri
 import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.viewinterop.AndroidView
 import com.recapmaster.app.PipelineParams
+import com.recapmaster.app.data.model.TtsEngine
+import com.recapmaster.app.data.model.VoiceProfile
+import com.recapmaster.app.data.model.VoiceProfiles
 import com.recapmaster.app.engine.BlurBoxConfig
 import com.recapmaster.app.pipeline.PipelineStage
 import com.recapmaster.app.pipeline.RecapPipelineManager
+import kotlinx.coroutines.launch
+import java.io.File
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 private val BgDeep       = Color(0xFF09090B)
@@ -83,8 +89,51 @@ fun RecapStudioScreen(
     var urlInput       by remember { mutableStateOf("") }
     var geminiKey      by remember { mutableStateOf("") }
 
-    // Voice
-    var selectedVoice  by remember { mutableStateOf("my-MM-ThihaNeural") }
+    val coroutineScope = rememberCoroutineScope()
+
+    // Voice Profiles & Engines
+    var selectedProfile by remember { mutableStateOf(VoiceProfiles.defaultProfile()) }
+    var engineFilter    by remember { mutableStateOf<TtsEngine?>(null) }
+    var customRateSlider by remember { mutableFloatStateOf(10f) }
+    var customPitchSlider by remember { mutableFloatStateOf(-2f) }
+    var customPersonaPrompt by remember { mutableStateOf("") }
+    var showFineTune    by remember { mutableStateOf(false) }
+
+    // In-app voice audition state
+    var isAuditioning   by remember { mutableStateOf(false) }
+    var auditionMessage by remember { mutableStateOf<String?>(null) }
+    val previewAudioFile = remember { File(context.cacheDir, "voice_audition_sample.wav") }
+
+    fun auditionVoice(profile: VoiceProfile) {
+        if (profile.isGemini && geminiKey.isBlank()) {
+            auditionMessage = "⚠️ Enter Gemini API Key in Card 1 to test Gemini AI Voice."
+            return
+        }
+        auditionMessage = null
+        isAuditioning = true
+        coroutineScope.launch {
+            try {
+                val resolved = profile.copy(
+                    rate = "${if (customRateSlider >= 0) "+" else ""}${customRateSlider.toInt()}%",
+                    pitch = "${if (customPitchSlider >= 0) "+" else ""}${customPitchSlider.toInt()}Hz",
+                    promptPersona = customPersonaPrompt
+                )
+                val audioFile = pipelineManager.previewVoice(resolved, geminiKey.trim(), previewAudioFile)
+                exoPlayer?.apply {
+                    stop()
+                    clearMediaItems()
+                    setMediaItem(MediaItem.fromUri(Uri.fromFile(audioFile)))
+                    prepare()
+                    play()
+                }
+                auditionMessage = "▶️ Playing sample: ${profile.name}"
+            } catch (e: Throwable) {
+                auditionMessage = "❌ Audition error: ${e.message}"
+            } finally {
+                isAuditioning = false
+            }
+        }
+    }
 
     // Sound style
     var soundStyleExpanded by remember { mutableStateOf(false) }
@@ -178,30 +227,211 @@ fun RecapStudioScreen(
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = textFieldColors(focusedBorderColor = Cyan),
-                    supportingText = { Text("Required for Burmese translation & recap narration", fontSize = 10.sp, color = TextMuted) }
+                    supportingText = { Text("Required for Burmese translation, narration script & Gemini AI Voice", fontSize = 10.sp, color = TextMuted) }
                 )
             }
 
-            // ── Card 2: Audio & Dubbing ───────────────────────────────────
-            StudioCard(title = "2. Audio & Dubbing Options", icon = Icons.Default.VolumeUp, accentColor = Cyan) {
+            // ── Card 2: Voice Profile & Dubbing ───────────────────────────
+            StudioCard(title = "2. Voice Profile & Dubbing Options", icon = Icons.Default.RecordVoiceOver, accentColor = Cyan) {
 
-                // Voice chips
-                Text("Burmese Voice (Microsoft Edge TTS)", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // TTS Engine filter chips
+                Text("Select TTS Engine / Provider", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
                     FilterChip(
-                        selected = selectedVoice == "my-MM-ThihaNeural",
-                        onClick = { selectedVoice = "my-MM-ThihaNeural" },
-                        label = { Text("👨 Thiha (Male)", fontSize = 13.sp) },
-                        modifier = Modifier.weight(1f),
+                        selected = engineFilter == null,
+                        onClick = { engineFilter = null },
+                        label = { Text("All", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Cyan, selectedLabelColor = Color.Black)
+                    )
+                    FilterChip(
+                        selected = engineFilter == TtsEngine.EDGE_TTS,
+                        onClick = { engineFilter = TtsEngine.EDGE_TTS },
+                        label = { Text("Edge (Free)", fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Purple, selectedLabelColor = Color.White)
                     )
                     FilterChip(
-                        selected = selectedVoice == "my-MM-NilarNeural",
-                        onClick = { selectedVoice = "my-MM-NilarNeural" },
-                        label = { Text("👩 Nilar (Female)", fontSize = 13.sp) },
-                        modifier = Modifier.weight(1f),
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Purple, selectedLabelColor = Color.White)
+                        selected = engineFilter == TtsEngine.GEMINI_VOICE,
+                        onClick = { engineFilter = TtsEngine.GEMINI_VOICE },
+                        label = { Text("Gemini AI", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Amber, selectedLabelColor = Color.Black)
                     )
+                    FilterChip(
+                        selected = engineFilter == TtsEngine.GOOGLE_CLOUD_TTS,
+                        onClick = { engineFilter = TtsEngine.GOOGLE_CLOUD_TTS },
+                        label = { Text("Google Cloud", fontSize = 11.sp) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green, selectedLabelColor = Color.Black)
+                    )
+                }
+
+                HorizontalDivider(color = Border)
+
+                // Voice Profile Cards
+                Text("Choose Voice Persona / Speaker", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                val filteredProfiles = remember(engineFilter) {
+                    if (engineFilter == null) VoiceProfiles.PRESETS else VoiceProfiles.PRESETS.filter { it.engine == engineFilter }
+                }
+
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    filteredProfiles.forEach { profile ->
+                        val isSelected = selectedProfile.id == profile.id
+                        val badgeColor = when (profile.engine) {
+                            TtsEngine.EDGE_TTS -> Purple
+                            TtsEngine.GEMINI_VOICE -> Amber
+                            TtsEngine.GOOGLE_CLOUD_TTS -> Green
+                        }
+
+                        Surface(
+                            onClick = {
+                                selectedProfile = profile
+                                customRateSlider = profile.rate.replace("%", "").replace("+", "").toFloatOrNull() ?: 0f
+                                customPitchSlider = profile.pitch.replace("Hz", "").replace("+", "").toFloatOrNull() ?: 0f
+                                customPersonaPrompt = profile.promptPersona
+                                auditionMessage = null
+                            },
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSelected) BgCardAlt else BgCard,
+                            border = androidx.compose.foundation.BorderStroke(
+                                width = if (isSelected) 1.5.dp else 1.dp,
+                                color = if (isSelected) badgeColor else Border
+                            ),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Text(if (profile.gender == "Male") "👨" else "👩", fontSize = 20.sp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Text(profile.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
+                                        Surface(
+                                            shape = RoundedCornerShape(4.dp),
+                                            color = badgeColor.copy(alpha = 0.2f)
+                                        ) {
+                                            Text(
+                                                profile.engine.badge,
+                                                fontSize = 9.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = badgeColor,
+                                                modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
+                                            )
+                                        }
+                                    }
+                                    Text(profile.subtitle, fontSize = 11.sp, color = TextSecondary)
+                                    if (profile.description.isNotBlank()) {
+                                        Text(profile.description, fontSize = 10.sp, color = TextMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
+                                }
+                                RadioButton(
+                                    selected = isSelected,
+                                    onClick = {
+                                        selectedProfile = profile
+                                        customRateSlider = profile.rate.replace("%", "").replace("+", "").toFloatOrNull() ?: 0f
+                                        customPitchSlider = profile.pitch.replace("Hz", "").replace("+", "").toFloatOrNull() ?: 0f
+                                        customPersonaPrompt = profile.promptPersona
+                                        auditionMessage = null
+                                    },
+                                    colors = RadioButtonDefaults.colors(selectedColor = badgeColor)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // In-App Audition / Voice Preview Button
+                OutlinedButton(
+                    onClick = { auditionVoice(selectedProfile) },
+                    enabled = !isAuditioning,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan)
+                ) {
+                    if (isAuditioning) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Cyan, strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Synthesizing Voice Sample...", fontSize = 12.sp)
+                    } else {
+                        Icon(Icons.Default.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("🔊 Preview Voice Sample (နမူနာအသံနားဆင်ရန်)", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                    }
+                }
+
+                auditionMessage?.let { msg ->
+                    Text(msg, fontSize = 11.sp, color = if (msg.startsWith("❌") || msg.startsWith("⚠️")) Red else Green)
+                }
+
+                // Fine-tuning collapsible toggle
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(Border.copy(alpha = 0.3f))
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Icon(Icons.Default.Tune, contentDescription = null, tint = TextSecondary, modifier = Modifier.size(16.dp))
+                        Text("Voice Speed, Pitch & Persona Tuning", fontSize = 11.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+                    }
+                    IconButton(onClick = { showFineTune = !showFineTune }, modifier = Modifier.size(24.dp)) {
+                        Icon(
+                            if (showFineTune) Icons.Default.ExpandLess else Icons.Default.ExpandMore,
+                            contentDescription = null,
+                            tint = TextSecondary
+                        )
+                    }
+                }
+
+                AnimatedVisibility(visible = showFineTune) {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Rate Slider
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Voice Speech Rate", fontSize = 11.sp, color = TextSecondary)
+                            Text("${if (customRateSlider >= 0) "+" else ""}${customRateSlider.toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Cyan)
+                        }
+                        Slider(
+                            value = customRateSlider,
+                            onValueChange = { customRateSlider = it },
+                            valueRange = -30f..50f,
+                            steps = 15,
+                            colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
+                        )
+
+                        // Pitch Slider
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Voice Pitch Adjustment", fontSize = 11.sp, color = TextSecondary)
+                            Text("${if (customPitchSlider >= 0) "+" else ""}${customPitchSlider.toInt()}Hz", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurpleLight)
+                        }
+                        Slider(
+                            value = customPitchSlider,
+                            onValueChange = { customPitchSlider = it },
+                            valueRange = -10f..10f,
+                            steps = 19,
+                            colors = SliderDefaults.colors(thumbColor = PurpleLight, activeTrackColor = PurpleLight, inactiveTrackColor = Border)
+                        )
+
+                        // If Gemini Voice: Persona Prompt
+                        if (selectedProfile.isGemini) {
+                            OutlinedTextField(
+                                value = customPersonaPrompt,
+                                onValueChange = { customPersonaPrompt = it },
+                                placeholder = { Text("Gemini Narration Tone (e.g. Deep thriller suspense narrator)", fontSize = 11.sp, color = TextMuted) },
+                                label = { Text("Gemini AI Voice Persona Prompt", fontSize = 10.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = textFieldColors(focusedBorderColor = Amber),
+                                textStyle = LocalTextStyle.current.copy(fontSize = 11.sp)
+                            )
+                        }
+                    }
                 }
 
                 HorizontalDivider(color = Border)
@@ -421,19 +651,24 @@ fun RecapStudioScreen(
                     try {
                         onStartPipeline(
                             PipelineParams(
-                                url           = urlInput.trim(),
-                                geminiKey     = geminiKey.trim(),
-                                voice         = selectedVoice,
-                                soundStyle    = soundStyle.value,
-                                burnSubtitles = burnSubtitles,
-                                subPlacement  = subtitlePlacement,
-                                fontScale     = fontScale,
-                                marginV       = marginV,
-                                speed         = playbackSpeed,
-                                blurEnabled   = blurEnabled,
-                                blurX         = blurX, blurY = blurY,
-                                blurW         = blurW, blurH = blurH,
-                                blurStrength  = blurStrength
+                                url            = urlInput.trim(),
+                                geminiKey      = geminiKey.trim(),
+                                voiceProfileId = selectedProfile.id,
+                                ttsEngine      = selectedProfile.engine.id,
+                                voice          = selectedProfile.voiceId,
+                                voiceRate      = "${if (customRateSlider >= 0) "+" else ""}${customRateSlider.toInt()}%",
+                                voicePitch     = "${if (customPitchSlider >= 0) "+" else ""}${customPitchSlider.toInt()}Hz",
+                                voicePrompt    = customPersonaPrompt,
+                                soundStyle     = soundStyle.value,
+                                burnSubtitles  = burnSubtitles,
+                                subPlacement   = subtitlePlacement,
+                                fontScale      = fontScale,
+                                marginV        = marginV,
+                                speed          = playbackSpeed,
+                                blurEnabled    = blurEnabled,
+                                blurX          = blurX, blurY = blurY,
+                                blurW          = blurW, blurH = blurH,
+                                blurStrength   = blurStrength
                             )
                         )
                     } catch (t: Throwable) {

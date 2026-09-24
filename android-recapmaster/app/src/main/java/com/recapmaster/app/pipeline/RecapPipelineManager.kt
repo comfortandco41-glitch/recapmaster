@@ -9,6 +9,9 @@ import android.provider.MediaStore
 import com.recapmaster.app.data.downloader.UrlDownloader
 import com.recapmaster.app.data.edgetts.EdgeTtsClient
 import com.recapmaster.app.data.gemini.GeminiClient
+import com.recapmaster.app.data.gemini.GeminiTtsClient
+import com.recapmaster.app.data.model.VoiceProfile
+import com.recapmaster.app.data.model.VoiceProfiles
 import com.recapmaster.app.engine.BlurBoxConfig
 import com.recapmaster.app.engine.FFmpegEngine
 import com.recapmaster.app.engine.SubtitleGenerator
@@ -51,6 +54,7 @@ class RecapPipelineManager(private val context: Context) {
     private val ffmpegEngine = FFmpegEngine(context)
     private val whisperEngine = WhisperEngine(context)
     private val edgeTtsClient = EdgeTtsClient()
+    private val geminiTtsClient = GeminiTtsClient()
 
     private val logBuffer = mutableListOf<String>()
 
@@ -64,10 +68,34 @@ class RecapPipelineManager(private val context: Context) {
         )
     }
 
+    suspend fun previewVoice(
+        profile: VoiceProfile,
+        geminiApiKey: String,
+        outputFile: File
+    ): File = withContext(Dispatchers.IO) {
+        val sampleText = profile.previewSampleText
+        if (profile.isGemini || profile.isGoogleCloud) {
+            geminiTtsClient.synthesizeSpeech(
+                apiKey = geminiApiKey,
+                text = sampleText,
+                outputFile = outputFile,
+                profile = profile
+            )
+        } else {
+            edgeTtsClient.synthesizeSpeech(
+                text = sampleText,
+                outputFile = outputFile,
+                voiceName = profile.voiceId,
+                rate = profile.rate,
+                pitch = profile.pitch
+            )
+        }
+    }
+
     suspend fun executePipeline(
         videoUrl: String,
         geminiApiKey: String,
-        voiceName: String = "my-MM-ThihaNeural",
+        voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile(),
         soundStyle: String = "cinematic_recap",
         burnSubtitles: Boolean = true,
         subtitlePlacement: String = "bottom",
@@ -82,7 +110,7 @@ class RecapPipelineManager(private val context: Context) {
         val workDir = File(context.cacheDir, "job_${System.currentTimeMillis()}").apply { mkdirs() }
         val sourceVideo = File(workDir, "source.mp4")
         val extractedAudio = File(workDir, "audio_16k.wav")
-        val voiceAudio = File(workDir, "dubbed_voice.mp3")
+        val voiceAudio = if (voiceProfile.isGemini) File(workDir, "dubbed_voice.wav") else File(workDir, "dubbed_voice.mp3")
         val assSubtitles = File(workDir, "subtitles.ass")
         val finalVideo = File(workDir, "final_recap.mp4")
 
@@ -112,16 +140,38 @@ class RecapPipelineManager(private val context: Context) {
             val narrationScript = geminiClient.generateRecapScript(burmeseTranscript)
             log("✅ Burmese recap script generated", progress = 0.65f)
 
-            // Stage 5: Edge TTS Voice Dubbing
-            log("🔊 [5/6] Synthesizing Burmese voice ($voiceName) via Edge TTS...", PipelineStage.DUBBING_VOICE, 0.68f)
-            edgeTtsClient.synthesizeSpeech(
-                text = narrationScript,
-                outputFile = voiceAudio,
-                voiceName = voiceName,
-                rate = "+10%",
-                pitch = "-2Hz"
-            )
-            log("✅ Voice narration synthesized", progress = 0.78f)
+            // Stage 5: Voice Dubbing (Gemini AI Voice or Edge TTS)
+            log("🔊 [5/6] Synthesizing Burmese voice (${voiceProfile.name}) via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+            if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                try {
+                    geminiTtsClient.synthesizeSpeech(
+                        apiKey = geminiApiKey,
+                        text = narrationScript,
+                        outputFile = voiceAudio,
+                        profile = voiceProfile
+                    )
+                    log("✅ Gemini AI voice narration synthesized successfully", progress = 0.78f)
+                } catch (e: Exception) {
+                    log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f)
+                    edgeTtsClient.synthesizeSpeech(
+                        text = narrationScript,
+                        outputFile = voiceAudio,
+                        voiceName = "my-MM-ThihaNeural",
+                        rate = voiceProfile.rate.ifBlank { "+10%" },
+                        pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                    )
+                    log("✅ Fallback voice narration synthesized via Edge TTS", progress = 0.78f)
+                }
+            } else {
+                edgeTtsClient.synthesizeSpeech(
+                    text = narrationScript,
+                    outputFile = voiceAudio,
+                    voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
+                    rate = voiceProfile.rate.ifBlank { "+10%" },
+                    pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                )
+                log("✅ Edge TTS voice narration synthesized", progress = 0.78f)
+            }
 
             // Subtitle Generation (.ass)
             val fontsDir = File(context.filesDir, "fonts").apply { mkdirs() }
