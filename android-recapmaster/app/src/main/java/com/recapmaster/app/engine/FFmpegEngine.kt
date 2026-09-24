@@ -81,7 +81,7 @@ class FFmpegEngine(private val context: Context) {
         outputVideo.parentFile?.mkdirs()
         val cmd = "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"[1:a]apad[a_pad]\" -map 0:v:0 -map \"[a_pad]\" " +
-                "-c:v copy -c:a aac -b:a 128k \"${outputVideo.absolutePath}\""
+                "-c:v copy -c:a aac -b:a 128k -shortest \"${outputVideo.absolutePath}\""
         executeFfmpeg(cmd)
         if (!outputVideo.exists() || outputVideo.length() == 0L) {
             throw RuntimeException("Preview mux failed: output file is empty")
@@ -168,7 +168,7 @@ class FFmpegEngine(private val context: Context) {
                 "-filter_complex \"$fullFilter\" " +
                 "-map \"[${if (hasVideoFilter) currentV else "0:v:0"}]\" -map \"[a_out]\" " +
                 "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
-                "-c:a aac -b:a 192k \"${outputVideo.absolutePath}\""
+                "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
         } else if (hasVideoFilter) {
             val audioPart = "[1:a]${audioEq},apad[a_out]"
             val fullFilter = "$videoFilterStr;$audioPart"
@@ -176,14 +176,14 @@ class FFmpegEngine(private val context: Context) {
                 "-filter_complex \"$fullFilter\" " +
                 "-map \"[$currentV]\" -map \"[a_out]\" " +
                 "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
-                "-c:a aac -b:a 192k \"${outputVideo.absolutePath}\""
+                "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
         } else {
             val audioPart = "[1:a]${audioEq},apad[a_out]"
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$audioPart\" " +
                 "-map 0:v:0 -map \"[a_out]\" " +
                 "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
-                "-c:a aac -b:a 192k \"${outputVideo.absolutePath}\""
+                "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
         }
 
         executeFfmpeg(cmd)
