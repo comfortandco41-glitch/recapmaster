@@ -91,6 +91,16 @@ fun RecapStudioScreen(
 
     val coroutineScope = rememberCoroutineScope()
 
+    // ExoPlayer for inline preview & voice audition (safely initialized)
+    val exoPlayer = remember {
+        try {
+            ExoPlayer.Builder(context).build()
+        } catch (t: Throwable) {
+            null
+        }
+    }
+    DisposableEffect(Unit) { onDispose { exoPlayer?.release() } }
+
     // Voice Profiles & Engines
     var selectedProfile by remember { mutableStateOf(VoiceProfiles.defaultProfile()) }
     var engineFilter    by remember { mutableStateOf<TtsEngine?>(null) }
@@ -156,16 +166,6 @@ fun RecapStudioScreen(
 
     // Speed
     var playbackSpeed  by remember { mutableFloatStateOf(1.0f) }
-
-    // ExoPlayer for inline preview (safely initialized)
-    val exoPlayer = remember {
-        try {
-            ExoPlayer.Builder(context).build()
-        } catch (_: Throwable) {
-            null
-        }
-    }
-    DisposableEffect(Unit) { onDispose { exoPlayer?.release() } }
 
     val isProcessing = pipelineState.stage != PipelineStage.IDLE &&
             pipelineState.stage != PipelineStage.COMPLETED &&
