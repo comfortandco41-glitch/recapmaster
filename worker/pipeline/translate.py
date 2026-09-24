@@ -16,6 +16,7 @@ _TRANSLATION_CACHE = {}
 LATEST_GEMINI_MODELS = [
     "gemini-3.8-flash",     # Latest Gemini 3 flagship Flash (fastest, newest)
     "gemini-3.7-flash",     # Gemini 3.7 Flash
+    "gemini-3.6-flash",     # Gemini 3.6 Flash
     "gemini-3.5-flash",     # Gemini 3.5 Flash
     "gemini-2.5-flash",     # Gemini 2.5 Flash (GA, widely available)
     "gemini-2.5-pro",       # Gemini 2.5 Pro

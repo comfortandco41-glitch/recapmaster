@@ -38,6 +38,7 @@ class RecapPipelineService : Service() {
         const val ACTION_START  = "com.recapmaster.app.PIPELINE_START"
         const val ACTION_CANCEL = "com.recapmaster.app.PIPELINE_CANCEL"
 
+        const val EXTRA_ACTION          = "pipeline_action" // "DUB" | "COMPOSE" | "FULL"
         const val EXTRA_URL             = "url"
         const val EXTRA_GEMINI_KEY      = "gemini_key"
         const val EXTRA_VOICE_PROFILE_ID = "voice_profile_id"
@@ -61,24 +62,26 @@ class RecapPipelineService : Service() {
 
         fun buildStartIntent(
             context: Context,
-            url: String,
-            geminiKey: String,
-            voiceProfileId: String,
-            ttsEngine: String,
-            voice: String,
-            rate: String,
-            pitch: String,
-            voicePrompt: String,
-            soundStyle: String,
-            burnSubtitles: Boolean,
-            subPlacement: String,
-            fontScale: Float,
-            marginV: Int,
-            speed: Float,
-            blurEnabled: Boolean,
-            blurX: Float, blurY: Float, blurW: Float, blurH: Float, blurStrength: Int
+            action: String = "FULL",
+            url: String = "",
+            geminiKey: String = "",
+            voiceProfileId: String = "edge_thiha_cinematic",
+            ttsEngine: String = "edge",
+            voice: String = "my-MM-ThihaNeural",
+            rate: String = "+0%",
+            pitch: String = "+0Hz",
+            voicePrompt: String = "",
+            soundStyle: String = "cinematic_recap",
+            burnSubtitles: Boolean = true,
+            subPlacement: String = "bottom",
+            fontScale: Float = 1.0f,
+            marginV: Int = 30,
+            speed: Float = 1.0f,
+            blurEnabled: Boolean = false,
+            blurX: Float = 0.78f, blurY: Float = 0.04f, blurW: Float = 0.18f, blurH: Float = 0.08f, blurStrength: Int = 16
         ) = Intent(context, RecapPipelineService::class.java).apply {
-            action = ACTION_START
+            this.action = ACTION_START
+            putExtra(EXTRA_ACTION,           action)
             putExtra(EXTRA_URL,              url)
             putExtra(EXTRA_GEMINI_KEY,       geminiKey)
             putExtra(EXTRA_VOICE_PROFILE_ID, voiceProfileId)
@@ -128,6 +131,7 @@ class RecapPipelineService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_START -> {
+                val pipelineAction = intent.getStringExtra(EXTRA_ACTION) ?: "FULL"
                 val url           = intent.getStringExtra(EXTRA_URL) ?: ""
                 val geminiKey     = intent.getStringExtra(EXTRA_GEMINI_KEY) ?: ""
                 val profileId     = intent.getStringExtra(EXTRA_VOICE_PROFILE_ID) ?: "edge_thiha_cinematic"
@@ -149,7 +153,7 @@ class RecapPipelineService : Service() {
                 val blurH         = intent.getFloatExtra(EXTRA_BLUR_H, 0.08f)
                 val blurStrength  = intent.getIntExtra(EXTRA_BLUR_STRENGTH, 16)
 
-                if (url.isBlank()) {
+                if (pipelineAction != "COMPOSE" && url.isBlank()) {
                     stopForegroundAndSelf()
                     return START_NOT_STICKY
                 }
@@ -183,23 +187,50 @@ class RecapPipelineService : Service() {
                 pipelineJob?.cancel()
                 pipelineJob = serviceScope.launch {
                     try {
-                        pipelineManager.executePipeline(
-                            videoUrl          = url,
-                            geminiApiKey      = geminiKey,
-                            voiceProfile      = activeProfile,
-                            soundStyle        = soundStyle,
-                            burnSubtitles     = burnSubs,
-                            subtitlePlacement = subPlacement,
-                            fontScale         = fontScale,
-                            marginV           = marginV,
-                            playbackSpeed     = speed,
-                            blurBox           = BlurBoxConfig(
-                                enabled  = blurEnabled,
-                                xPct     = blurX, yPct = blurY,
-                                wPct     = blurW, hPct = blurH,
-                                strength = blurStrength
-                            )
-                        )
+                        when (pipelineAction) {
+                            "DUB" -> {
+                                pipelineManager.startDubbingPipeline(
+                                    videoUrl     = url,
+                                    geminiApiKey = geminiKey,
+                                    voiceProfile = activeProfile
+                                )
+                            }
+                            "COMPOSE" -> {
+                                pipelineManager.generateFinalVideo(
+                                    soundStyle        = soundStyle,
+                                    burnSubtitles     = burnSubs,
+                                    subtitlePlacement = subPlacement,
+                                    fontScale         = fontScale,
+                                    marginV           = marginV,
+                                    playbackSpeed     = speed,
+                                    blurBox           = BlurBoxConfig(
+                                        enabled  = blurEnabled,
+                                        xPct     = blurX, yPct = blurY,
+                                        wPct     = blurW, hPct = blurH,
+                                        strength = blurStrength
+                                    )
+                                )
+                            }
+                            else -> {
+                                pipelineManager.executePipeline(
+                                    videoUrl          = url,
+                                    geminiApiKey      = geminiKey,
+                                    voiceProfile      = activeProfile,
+                                    soundStyle        = soundStyle,
+                                    burnSubtitles     = burnSubs,
+                                    subtitlePlacement = subPlacement,
+                                    fontScale         = fontScale,
+                                    marginV           = marginV,
+                                    playbackSpeed     = speed,
+                                    blurBox           = BlurBoxConfig(
+                                        enabled  = blurEnabled,
+                                        xPct     = blurX, yPct = blurY,
+                                        wPct     = blurW, hPct = blurH,
+                                        strength = blurStrength
+                                    )
+                                )
+                            }
+                        }
                     } catch (t: Throwable) {
                         t.printStackTrace()
                     } finally {

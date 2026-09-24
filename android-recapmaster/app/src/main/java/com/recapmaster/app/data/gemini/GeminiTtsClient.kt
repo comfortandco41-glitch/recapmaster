@@ -47,7 +47,7 @@ class GeminiTtsClient {
     }
 
     /**
-     * Synthesizes audio using Google Gemini Multimodal Audio Generation (Gemini 2.5 / 2.0 Flash)
+     * Synthesizes audio using Google Gemini Multimodal Audio Generation (Gemini 3.6 Flash)
      */
     private fun synthesizeGeminiAudio(apiKey: String, fullText: String, profile: VoiceProfile): ByteArray {
         val voiceName = if (profile.voiceId.isNotBlank()) profile.voiceId else "Charon"
@@ -76,7 +76,8 @@ class GeminiTtsClient {
         voiceName: String,
         promptPersona: String
     ): ByteArray {
-        val models = listOf("gemini-2.5-flash", "gemini-2.0-flash")
+        // Use gemini-3.6-flash model
+        val models = listOf("gemini-3.6-flash")
         var lastException: Exception? = null
 
         for (model in models) {
@@ -84,10 +85,9 @@ class GeminiTtsClient {
                 return callGeminiAudioApi(apiKey, model, chunkText, voiceName, promptPersona)
             } catch (e: Exception) {
                 lastException = e
-                // Try next model if available
             }
         }
-        throw lastException ?: RuntimeException("Gemini Audio synthesis failed across available models")
+        throw lastException ?: RuntimeException("Gemini Audio synthesis failed with gemini-3.6-flash")
     }
 
     private fun callGeminiAudioApi(

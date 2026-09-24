@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
     private fun startPipelineSafely(params: PipelineParams) {
         val serviceIntent = RecapPipelineService.buildStartIntent(
             context          = this,
+            action           = params.action,
             url              = params.url,
             geminiKey        = params.geminiKey,
             voiceProfileId   = params.voiceProfileId,
@@ -95,31 +96,64 @@ class MainActivity : ComponentActivity() {
             // Robust fallback to in-process coroutine if system restricts foreground service
             lifecycleScope.launch(Dispatchers.IO) {
                 try {
-                    val baseProfile = com.recapmaster.app.data.model.VoiceProfiles.findById(params.voiceProfileId)
-                    val resolvedProfile = baseProfile.copy(
-                        voiceId = if (params.voice.isNotBlank()) params.voice else baseProfile.voiceId,
-                        rate = if (params.voiceRate.isNotBlank()) params.voiceRate else baseProfile.rate,
-                        pitch = if (params.voicePitch.isNotBlank()) params.voicePitch else baseProfile.pitch,
-                        promptPersona = if (params.voicePrompt.isNotBlank()) params.voicePrompt else baseProfile.promptPersona
-                    )
-
-                    pipelineManager.executePipeline(
-                        videoUrl          = params.url,
-                        geminiApiKey      = params.geminiKey,
-                        voiceProfile      = resolvedProfile,
-                        soundStyle        = params.soundStyle,
-                        burnSubtitles     = params.burnSubtitles,
-                        subtitlePlacement = params.subPlacement,
-                        fontScale         = params.fontScale,
-                        marginV           = params.marginV,
-                        playbackSpeed     = params.speed,
-                        blurBox           = BlurBoxConfig(
-                            enabled  = params.blurEnabled,
-                            xPct     = params.blurX, yPct = params.blurY,
-                            wPct     = params.blurW, hPct = params.blurH,
-                            strength = params.blurStrength
-                        )
-                    )
+                    when (params.action) {
+                        "DUB" -> {
+                            val baseProfile = com.recapmaster.app.data.model.VoiceProfiles.findById(params.voiceProfileId)
+                            val resolvedProfile = baseProfile.copy(
+                                voiceId = if (params.voice.isNotBlank()) params.voice else baseProfile.voiceId,
+                                rate = if (params.voiceRate.isNotBlank()) params.voiceRate else baseProfile.rate,
+                                pitch = if (params.voicePitch.isNotBlank()) params.voicePitch else baseProfile.pitch,
+                                promptPersona = if (params.voicePrompt.isNotBlank()) params.voicePrompt else baseProfile.promptPersona
+                            )
+                            pipelineManager.startDubbingPipeline(
+                                videoUrl     = params.url,
+                                geminiApiKey = params.geminiKey,
+                                voiceProfile = resolvedProfile
+                            )
+                        }
+                        "COMPOSE" -> {
+                            pipelineManager.generateFinalVideo(
+                                soundStyle        = params.soundStyle,
+                                burnSubtitles     = params.burnSubtitles,
+                                subtitlePlacement = params.subPlacement,
+                                fontScale         = params.fontScale,
+                                marginV           = params.marginV,
+                                playbackSpeed     = params.speed,
+                                blurBox           = BlurBoxConfig(
+                                    enabled  = params.blurEnabled,
+                                    xPct     = params.blurX, yPct = params.blurY,
+                                    wPct     = params.blurW, hPct = params.blurH,
+                                    strength = params.blurStrength
+                                )
+                            )
+                        }
+                        else -> {
+                            val baseProfile = com.recapmaster.app.data.model.VoiceProfiles.findById(params.voiceProfileId)
+                            val resolvedProfile = baseProfile.copy(
+                                voiceId = if (params.voice.isNotBlank()) params.voice else baseProfile.voiceId,
+                                rate = if (params.voiceRate.isNotBlank()) params.voiceRate else baseProfile.rate,
+                                pitch = if (params.voicePitch.isNotBlank()) params.voicePitch else baseProfile.pitch,
+                                promptPersona = if (params.voicePrompt.isNotBlank()) params.voicePrompt else baseProfile.promptPersona
+                            )
+                            pipelineManager.executePipeline(
+                                videoUrl          = params.url,
+                                geminiApiKey      = params.geminiKey,
+                                voiceProfile      = resolvedProfile,
+                                soundStyle        = params.soundStyle,
+                                burnSubtitles     = params.burnSubtitles,
+                                subtitlePlacement = params.subPlacement,
+                                fontScale         = params.fontScale,
+                                marginV           = params.marginV,
+                                playbackSpeed     = params.speed,
+                                blurBox           = BlurBoxConfig(
+                                    enabled  = params.blurEnabled,
+                                    xPct     = params.blurX, yPct = params.blurY,
+                                    wPct     = params.blurW, hPct = params.blurH,
+                                    strength = params.blurStrength
+                                )
+                            )
+                        }
+                    }
                 } catch (err: Throwable) {
                     err.printStackTrace()
                 }
@@ -175,22 +209,23 @@ class MainActivity : ComponentActivity() {
 
 /** Typed parameter bundle passed from the UI to the service starter */
 data class PipelineParams(
-    val url: String,
-    val geminiKey: String,
+    val action: String = "FULL", // "DUB" | "COMPOSE" | "FULL"
+    val url: String = "",
+    val geminiKey: String = "",
     val voiceProfileId: String = "edge_thiha_cinematic",
     val ttsEngine: String = "edge",
     val voice: String = "my-MM-ThihaNeural",
     val voiceRate: String = "+0%",
     val voicePitch: String = "+0Hz",
     val voicePrompt: String = "",
-    val soundStyle: String,
-    val burnSubtitles: Boolean,
-    val subPlacement: String,
-    val fontScale: Float,
-    val marginV: Int,
-    val speed: Float,
-    val blurEnabled: Boolean,
-    val blurX: Float, val blurY: Float,
-    val blurW: Float, val blurH: Float,
-    val blurStrength: Int
+    val soundStyle: String = "cinematic_recap",
+    val burnSubtitles: Boolean = true,
+    val subPlacement: String = "bottom",
+    val fontScale: Float = 1.0f,
+    val marginV: Int = 30,
+    val speed: Float = 1.0f,
+    val blurEnabled: Boolean = false,
+    val blurX: Float = 0.78f, val blurY: Float = 0.04f,
+    val blurW: Float = 0.18f, val blurH: Float = 0.08f,
+    val blurStrength: Int = 16
 )

@@ -52,7 +52,7 @@ $burmeseTranscript
     }
 
     private fun callGemini(promptText: String): String {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=$apiKey"
+        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=$apiKey"
 
         val jsonBody = JSONObject().apply {
             put("contents", JSONArray().apply {

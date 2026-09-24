@@ -70,6 +70,25 @@ class FFmpegEngine(private val context: Context) {
     }
 
     /**
+     * Rapidly muxes source video with dubbed audio without re-encoding video stream.
+     * Takes ~1 second and produces an instant synchronized preview file for ExoPlayer.
+     */
+    suspend fun muxPreviewDubbedVideo(
+        sourceVideo: File,
+        dubbedVoiceAudio: File,
+        outputVideo: File
+    ): File = withContext(Dispatchers.IO) {
+        outputVideo.parentFile?.mkdirs()
+        val cmd = "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
+                "-map 0:v:0 -map 1:a:0 -c:v copy -c:a aac -b:a 128k -shortest \"${outputVideo.absolutePath}\""
+        executeFfmpeg(cmd)
+        if (!outputVideo.exists() || outputVideo.length() == 0L) {
+            throw RuntimeException("Preview mux failed: output file is empty")
+        }
+        outputVideo
+    }
+
+    /**
      * Composes the final recap video:
      * - Applies playback speed scaling (0.25x–4.0x) on both video and audio.
      * - Applies custom blur box for watermark/logo removal.

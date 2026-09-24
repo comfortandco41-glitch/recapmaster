@@ -31,6 +31,7 @@ enum class PipelineStage {
     TRANSCRIBING,
     TRANSLATING_SCRIPT,
     DUBBING_VOICE,
+    DUBBED_READY,        // Video & audio dubbed; waiting for user live subtitle & watermark tuning
     COMPOSING_VIDEO,
     COMPLETED,
     FAILED
@@ -41,9 +42,16 @@ data class PipelineState(
     val progress: Float = 0.0f,
     val message: String = "Ready",
     val finalVideoUri: Uri? = null,
+    val dubbedPreviewUri: Uri? = null,
+    val previewSubtitleText: String = "မင်္ဂလာပါ... ဒီဇာတ်လမ်းကတော့ စိတ်လှုပ်ရှားဖွယ် ဇာတ်ကားကောင်းတစ်ခု ဖြစ်ပါတယ်။",
     val error: String? = null,
     val logLines: List<String> = emptyList()
-)
+) {
+    val isBusy: Boolean get() = stage != PipelineStage.IDLE &&
+            stage != PipelineStage.DUBBED_READY &&
+            stage != PipelineStage.COMPLETED &&
+            stage != PipelineStage.FAILED
+}
 
 class RecapPipelineManager(private val context: Context) {
 
@@ -57,6 +65,13 @@ class RecapPipelineManager(private val context: Context) {
     private val geminiTtsClient = GeminiTtsClient()
 
     private val logBuffer = mutableListOf<String>()
+
+    // Retained session state for interactive post-dubbing composition
+    private var activeWorkDir: File? = null
+    private var activeSourceVideo: File? = null
+    private var activeVoiceAudio: File? = null
+    private var activeBurmeseTranscript: String? = null
+    private var activePreviewVideo: File? = null
 
     private fun log(msg: String, stage: PipelineStage? = null, progress: Float? = null) {
         logBuffer.add(msg)
@@ -92,17 +107,14 @@ class RecapPipelineManager(private val context: Context) {
         }
     }
 
-    suspend fun executePipeline(
+    /**
+     * Phase 1: Downloads, transcribes, translates, dubs voice, and produces an instant
+     * synchronized preview video for interactive live layout tuning in ExoPlayer.
+     */
+    suspend fun startDubbingPipeline(
         videoUrl: String,
         geminiApiKey: String,
-        voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile(),
-        soundStyle: String = "cinematic_recap",
-        burnSubtitles: Boolean = true,
-        subtitlePlacement: String = "bottom",
-        fontScale: Float = 1.0f,
-        marginV: Int = 30,
-        playbackSpeed: Float = 1.0f,
-        blurBox: BlurBoxConfig = BlurBoxConfig()
+        voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile()
     ) = withContext(Dispatchers.IO) {
         logBuffer.clear()
         _state.value = PipelineState()
@@ -111,22 +123,21 @@ class RecapPipelineManager(private val context: Context) {
         val sourceVideo = File(workDir, "source.mp4")
         val extractedAudio = File(workDir, "audio_16k.wav")
         val voiceAudio = if (voiceProfile.isGemini) File(workDir, "dubbed_voice.wav") else File(workDir, "dubbed_voice.mp3")
-        val assSubtitles = File(workDir, "subtitles.ass")
-        val finalVideo = File(workDir, "final_recap.mp4")
+        val previewVideo = File(workDir, "dubbed_preview.mp4")
 
         try {
             // Stage 1: Download
-            log("📥 [1/6] Downloading video from URL...", PipelineStage.DOWNLOADING, 0.05f)
+            log("📥 [1/5] Downloading video from URL...", PipelineStage.DOWNLOADING, 0.05f)
             val downloadRes = downloader.downloadUrl(videoUrl, sourceVideo)
             log("✅ Downloaded: ${downloadRes.title} (${downloadRes.durationSeconds.toInt()}s)", progress = 0.18f)
 
             // Stage 2: Audio Extraction
-            log("🎙️ [2/6] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, 0.22f)
+            log("🎙️ [2/5] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, 0.22f)
             ffmpegEngine.extractSpeechAudio(downloadRes.localFile, extractedAudio)
             log("✅ Audio extracted (16kHz mono PCM)", progress = 0.32f)
 
             // Stage 3: On-Device Whisper Transcription
-            log("🧠 [3/6] Transcribing dialogue on-device with Whisper...", PipelineStage.TRANSCRIBING, 0.35f)
+            log("🧠 [3/5] Transcribing dialogue on-device with Whisper...", PipelineStage.TRANSCRIBING, 0.35f)
             val modelFile = ensureWhisperModel()
             whisperEngine.loadModel(modelFile)
             val transcriptJson = whisperEngine.transcribeWav(extractedAudio, language = "auto")
@@ -134,14 +145,14 @@ class RecapPipelineManager(private val context: Context) {
             log("✅ Transcription complete", progress = 0.50f)
 
             // Stage 4: Gemini Burmese Translation & Recap Script
-            log("🌏 [4/6] Translating & generating Burmese recap narration via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
+            log("🌏 [4/5] Translating & generating Burmese recap narration via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
             val narrationScript = geminiClient.generateRecapScript(burmeseTranscript)
             log("✅ Burmese recap script generated", progress = 0.65f)
 
             // Stage 5: Voice Dubbing (Gemini AI Voice or Edge TTS)
-            log("🔊 [5/6] Synthesizing Burmese voice (${voiceProfile.name}) via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+            log("🔊 [5/5] Synthesizing Burmese voice (${voiceProfile.name}) via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
             if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
                 try {
                     geminiTtsClient.synthesizeSpeech(
@@ -173,48 +184,35 @@ class RecapPipelineManager(private val context: Context) {
                 log("✅ Edge TTS voice narration synthesized", progress = 0.78f)
             }
 
-            // Subtitle Generation (.ass)
-            val fontsDir = File(context.filesDir, "fonts").apply { mkdirs() }
-            ensurePadaukFont(fontsDir)
-            val assFileToUse: File? = if (burnSubtitles) {
-                SubtitleGenerator.generateAssFile(
-                    transcriptJson = burmeseTranscript,
-                    outputAssFile = assSubtitles,
-                    placement = subtitlePlacement,
-                    fontScale = fontScale,
-                    marginV = marginV
-                )
-            } else null
+            // Prepare instant synced preview video (fast stream copy)
+            log("⚡ Preparing synchronized video for live subtitle & blur preview...", progress = 0.85f)
+            try {
+                ffmpegEngine.muxPreviewDubbedVideo(downloadRes.localFile, voiceAudio, previewVideo)
+            } catch (e: Throwable) {
+                log("ℹ️ Preview mux note: using original video stream for preview", progress = 0.88f)
+            }
 
-            // Stage 6: Video Composition
-            log("🎬 [6/6] Composing final video with ${soundStyle.replace("_", " ")} audio style...", PipelineStage.COMPOSING_VIDEO, 0.82f)
-            ffmpegEngine.renderFinalRecap(
-                sourceVideo = downloadRes.localFile,
-                dubbedVoiceAudio = voiceAudio,
-                assSubtitleFile = assFileToUse,
-                outputVideo = finalVideo,
-                playbackSpeed = playbackSpeed,
-                blurBox = blurBox,
-                fontsDir = fontsDir,
-                soundStyle = soundStyle
-            )
-            log("✅ Video composed successfully", progress = 0.96f)
+            // Save active job references for live studio tuning
+            activeWorkDir = workDir
+            activeSourceVideo = downloadRes.localFile
+            activeVoiceAudio = voiceAudio
+            activeBurmeseTranscript = burmeseTranscript
+            activePreviewVideo = if (previewVideo.exists() && previewVideo.length() > 0) previewVideo else downloadRes.localFile
 
-            // Save to Gallery
-            val savedUri = exportToGallery(finalVideo, "recap_${System.currentTimeMillis()}.mp4")
-            workDir.deleteRecursively()
+            val sampleSubtitleText = extractFirstSubtitleSnippet(burmeseTranscript)
 
-            logBuffer.add("🎉 Done! Saved to Movies/RecapMaster/")
-            _state.value = PipelineState(
-                stage = PipelineStage.COMPLETED,
-                progress = 1.0f,
-                message = "✅ Recap video saved to Gallery!",
-                finalVideoUri = savedUri,
-                logLines = logBuffer.toList()
+            log("✨ Video dubbed successfully! Ready for live subtitle & watermark blur tuning.", PipelineStage.DUBBED_READY, 0.90f)
+            _state.value = _state.value.copy(
+                stage = PipelineStage.DUBBED_READY,
+                progress = 0.90f,
+                dubbedPreviewUri = Uri.fromFile(activePreviewVideo),
+                previewSubtitleText = sampleSubtitleText,
+                message = "✨ Video dubbed! You can now adjust Subtitles & Blur Watermark with Live Preview."
             )
 
         } catch (e: Throwable) {
             workDir.deleteRecursively()
+            activeWorkDir = null
             val errMsg = e.message ?: e.javaClass.simpleName
             logBuffer.add("❌ Error: $errMsg")
             _state.value = PipelineState(
@@ -227,7 +225,136 @@ class RecapPipelineManager(private val context: Context) {
         }
     }
 
+    /**
+     * Phase 2: Renders final video using the user's live-tuned subtitle layout and blur watermark box.
+     */
+    suspend fun generateFinalVideo(
+        soundStyle: String = "cinematic_recap",
+        burnSubtitles: Boolean = true,
+        subtitlePlacement: String = "bottom",
+        fontScale: Float = 1.0f,
+        marginV: Int = 30,
+        playbackSpeed: Float = 1.0f,
+        blurBox: BlurBoxConfig = BlurBoxConfig()
+    ) = withContext(Dispatchers.IO) {
+        val workDir = activeWorkDir
+        val sourceVideo = activeSourceVideo
+        val voiceAudio = activeVoiceAudio
+        val burmeseTranscript = activeBurmeseTranscript
+
+        if (workDir == null || sourceVideo == null || voiceAudio == null) {
+            log("❌ Error: No dubbed video session found to generate. Please dub a video first.", PipelineStage.FAILED)
+            return@withContext
+        }
+
+        try {
+            val finalVideo = File(workDir, "final_recap.mp4")
+            val assSubtitles = File(workDir, "subtitles.ass")
+
+            // Subtitle Generation (.ass)
+            val fontsDir = File(context.filesDir, "fonts").apply { mkdirs() }
+            ensurePadaukFont(fontsDir)
+            val assFileToUse: File? = if (burnSubtitles && !burmeseTranscript.isNullOrBlank()) {
+                SubtitleGenerator.generateAssFile(
+                    transcriptJson = burmeseTranscript,
+                    outputAssFile = assSubtitles,
+                    placement = subtitlePlacement,
+                    fontScale = fontScale,
+                    marginV = marginV
+                )
+            } else null
+
+            // Video Composition with FFmpegKit
+            log("🎬 Composing final recap video with live subtitle & watermark blur settings...", PipelineStage.COMPOSING_VIDEO, 0.92f)
+            ffmpegEngine.renderFinalRecap(
+                sourceVideo = sourceVideo,
+                dubbedVoiceAudio = voiceAudio,
+                assSubtitleFile = assFileToUse,
+                outputVideo = finalVideo,
+                playbackSpeed = playbackSpeed,
+                blurBox = blurBox,
+                fontsDir = fontsDir,
+                soundStyle = soundStyle
+            )
+            log("✅ Video composed successfully", progress = 0.98f)
+
+            // Save to Gallery MediaStore
+            val savedUri = exportToGallery(finalVideo, "recap_${System.currentTimeMillis()}.mp4")
+            workDir.deleteRecursively()
+            activeWorkDir = null
+
+            logBuffer.add("🎉 Done! Saved to Movies/RecapMaster/")
+            _state.value = PipelineState(
+                stage = PipelineStage.COMPLETED,
+                progress = 1.0f,
+                message = "✅ Recap video saved to Gallery!",
+                finalVideoUri = savedUri,
+                dubbedPreviewUri = savedUri,
+                logLines = logBuffer.toList()
+            )
+
+        } catch (e: Throwable) {
+            val errMsg = e.message ?: e.javaClass.simpleName
+            logBuffer.add("❌ Error rendering final video: $errMsg")
+            _state.value = _state.value.copy(
+                stage = PipelineStage.FAILED,
+                error = errMsg,
+                message = "Composition error: $errMsg",
+                logLines = logBuffer.toList()
+            )
+        }
+    }
+
+    /**
+     * Backward-compatible convenience method that executes the full pipeline from end to end.
+     */
+    suspend fun executePipeline(
+        videoUrl: String,
+        geminiApiKey: String,
+        voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile(),
+        soundStyle: String = "cinematic_recap",
+        burnSubtitles: Boolean = true,
+        subtitlePlacement: String = "bottom",
+        fontScale: Float = 1.0f,
+        marginV: Int = 30,
+        playbackSpeed: Float = 1.0f,
+        blurBox: BlurBoxConfig = BlurBoxConfig()
+    ) = withContext(Dispatchers.IO) {
+        startDubbingPipeline(videoUrl, geminiApiKey, voiceProfile)
+        if (_state.value.stage == PipelineStage.DUBBED_READY) {
+            generateFinalVideo(
+                soundStyle = soundStyle,
+                burnSubtitles = burnSubtitles,
+                subtitlePlacement = subtitlePlacement,
+                fontScale = fontScale,
+                marginV = marginV,
+                playbackSpeed = playbackSpeed,
+                blurBox = blurBox
+            )
+        }
+    }
+
+    private fun extractFirstSubtitleSnippet(burmeseTranscript: String): String {
+        try {
+            val root = org.json.JSONObject(burmeseTranscript)
+            val segs = root.optJSONArray("segments")
+            if (segs != null && segs.length() > 0) {
+                for (i in 0 until segs.length()) {
+                    val t = segs.getJSONObject(i).optString("text", "").trim()
+                    if (t.isNotBlank()) return t
+                }
+            }
+        } catch (_: Throwable) {}
+        return "ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြချက် နမူနာစာတန်း"
+    }
+
     fun reset() {
+        activeWorkDir?.deleteRecursively()
+        activeWorkDir = null
+        activeSourceVideo = null
+        activeVoiceAudio = null
+        activeBurmeseTranscript = null
+        activePreviewVideo = null
         logBuffer.clear()
         _state.value = PipelineState()
     }

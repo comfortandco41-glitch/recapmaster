@@ -19,6 +19,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.foundation.border
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -167,9 +169,50 @@ fun RecapStudioScreen(
     // Speed
     var playbackSpeed  by remember { mutableFloatStateOf(1.0f) }
 
-    val isProcessing = pipelineState.stage != PipelineStage.IDLE &&
-            pipelineState.stage != PipelineStage.COMPLETED &&
-            pipelineState.stage != PipelineStage.FAILED
+    val isDubbing = pipelineState.stage == PipelineStage.DOWNLOADING ||
+            pipelineState.stage == PipelineStage.EXTRACTING_AUDIO ||
+            pipelineState.stage == PipelineStage.TRANSCRIBING ||
+            pipelineState.stage == PipelineStage.TRANSLATING_SCRIPT ||
+            pipelineState.stage == PipelineStage.DUBBING_VOICE
+
+    val isComposing = pipelineState.stage == PipelineStage.COMPOSING_VIDEO
+    val isDubbedReady = pipelineState.stage == PipelineStage.DUBBED_READY
+    val isCompleted = pipelineState.stage == PipelineStage.COMPLETED
+    val isProcessing = isDubbing || isComposing
+
+    // Automatically load dubbed preview video into player when ready
+    LaunchedEffect(pipelineState.dubbedPreviewUri) {
+        pipelineState.dubbedPreviewUri?.let { uri ->
+            try {
+                exoPlayer?.apply {
+                    stop()
+                    clearMediaItems()
+                    setMediaItem(MediaItem.fromUri(uri))
+                    prepare()
+                    play()
+                }
+            } catch (t: Throwable) {
+                t.printStackTrace()
+            }
+        }
+    }
+
+    // Automatically load final video into player when completed
+    LaunchedEffect(pipelineState.finalVideoUri) {
+        pipelineState.finalVideoUri?.let { uri ->
+            try {
+                exoPlayer?.apply {
+                    stop()
+                    clearMediaItems()
+                    setMediaItem(MediaItem.fromUri(uri))
+                    prepare()
+                    play()
+                }
+            } catch (t: Throwable) {
+                t.printStackTrace()
+            }
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -434,223 +477,15 @@ fun RecapStudioScreen(
                     }
                 }
 
-                HorizontalDivider(color = Border)
-
-                // Sound style dropdown
-                Text("Sound Design & Mastering Preset", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
-                ExposedDropdownMenuBox(expanded = soundStyleExpanded, onExpandedChange = { soundStyleExpanded = it }) {
-                    OutlinedTextField(
-                        value = soundStyle.label,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = soundStyleExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor(),
-                        colors = textFieldColors(focusedBorderColor = Cyan),
-                        textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = TextPrimary)
-                    )
-                    ExposedDropdownMenu(
-                        expanded = soundStyleExpanded,
-                        onDismissRequest = { soundStyleExpanded = false },
-                        modifier = Modifier.background(BgCard)
-                    ) {
-                        SOUND_STYLES.forEach { style ->
-                            DropdownMenuItem(
-                                text = { Text(style.label, fontSize = 13.sp, color = TextPrimary) },
-                                onClick = { soundStyle = style; soundStyleExpanded = false }
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(color = Border)
-
-                // Speed slider
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Text("Playback Speed", fontSize = 12.sp, color = TextSecondary)
-                    Surface(shape = RoundedCornerShape(6.dp), color = Amber.copy(alpha = 0.15f)) {
-                        Text(
-                            "${String.format("%.2f", playbackSpeed)}×",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Amber
-                        )
-                    }
-                }
-                Slider(
-                    value = playbackSpeed,
-                    onValueChange = { playbackSpeed = it },
-                    valueRange = 0.5f..2.0f,
-                    steps = 5,
-                    colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
-                )
-                Text("Audio and video playback are synchronized", fontSize = 10.sp, color = TextMuted)
             }
 
-            // ── Card 3: Subtitle Layout ───────────────────────────────────
-            StudioCard(title = "3. Subtitle Layout", icon = Icons.Default.Subtitles, accentColor = Green) {
-
-                // Burn toggle
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column {
-                        Text("Burn Burmese Subtitles (Padauk Font)", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                        Text("HarfBuzz OpenType shaping for correct Burmese glyphs", fontSize = 10.sp, color = TextMuted)
-                    }
-                    Switch(
-                        checked = burnSubtitles,
-                        onCheckedChange = { burnSubtitles = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Green)
-                    )
-                }
-
-                AnimatedVisibility(visible = burnSubtitles) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HorizontalDivider(color = Border)
-
-                        // Placement chips
-                        Text("Subtitle Placement / Position", fontSize = 12.sp, color = TextSecondary)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("bottom" to "Bottom", "top" to "Top", "middle" to "Middle").forEach { (value, label) ->
-                                FilterChip(
-                                    selected = subtitlePlacement == value,
-                                    onClick = { subtitlePlacement = value },
-                                    label = { Text(label, fontSize = 12.sp) },
-                                    colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green, selectedLabelColor = Color.Black)
-                                )
-                            }
-                        }
-
-                        // Font scale
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Font Size Scale", fontSize = 12.sp, color = TextSecondary)
-                            Text(String.format("%.2f×", fontScale), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Green)
-                        }
-                        Slider(
-                            value = fontScale,
-                            onValueChange = { fontScale = it },
-                            valueRange = 0.7f..1.6f,
-                            steps = 17,
-                            colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
-                        )
-                        Text("1.0 = standard · 1.3 = large headline · 0.8 = compact", fontSize = 10.sp, color = TextMuted)
-
-                        // Vertical margin
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Vertical Edge Margin", fontSize = 12.sp, color = TextSecondary)
-                            Text("${marginV}px", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Green)
-                        }
-                        Slider(
-                            value = marginV.toFloat(),
-                            onValueChange = { marginV = it.toInt() },
-                            valueRange = 10f..120f,
-                            steps = 21,
-                            colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
-                        )
-                    }
-                }
-            }
-
-            // ── Card 4: Logo / Blur Removal ───────────────────────────────
-            StudioCard(title = "4. Logo / Watermark Blur Removal", icon = Icons.Default.BlurOn, accentColor = Amber) {
-
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column {
-                        Text("Enable Logo / Watermark Blur Box", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                        Text("Frosted blur over old logos, TV bugs, or hardcoded subs", fontSize = 10.sp, color = TextMuted)
-                    }
-                    Switch(
-                        checked = blurEnabled,
-                        onCheckedChange = { blurEnabled = it },
-                        colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Amber)
-                    )
-                }
-
-                AnimatedVisibility(visible = blurEnabled) {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        HorizontalDivider(color = Border)
-
-                        // Quick presets
-                        Text("Quick Position Presets", fontSize = 12.sp, color = TextSecondary)
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            BLUR_PRESETS.chunked(2).forEach { row ->
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                    row.forEach { preset ->
-                                        FilterChip(
-                                            selected = selectedPreset == preset,
-                                            onClick = {
-                                                selectedPreset = preset
-                                                blurX = preset.x; blurY = preset.y
-                                                blurW = preset.w; blurH = preset.h
-                                            },
-                                            label = { Text(preset.label, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                            modifier = Modifier.weight(1f),
-                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Amber, selectedLabelColor = Color.Black)
-                                        )
-                                    }
-                                    // Fill empty slot if odd number
-                                    if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-
-                        HorizontalDivider(color = Border)
-                        Text("Custom Coordinates", fontSize = 12.sp, color = TextSecondary)
-
-                        // X position
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Box Left X", fontSize = 12.sp, color = TextSecondary)
-                            Text("${(blurX * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Amber)
-                        }
-                        Slider(value = blurX, onValueChange = { blurX = it; selectedPreset = null }, valueRange = 0f..1f,
-                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                        // Y position
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Box Top Y", fontSize = 12.sp, color = TextSecondary)
-                            Text("${(blurY * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Amber)
-                        }
-                        Slider(value = blurY, onValueChange = { blurY = it; selectedPreset = null }, valueRange = 0f..1f,
-                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                        // Width
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Box Width", fontSize = 12.sp, color = TextSecondary)
-                            Text("${(blurW * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Amber)
-                        }
-                        Slider(value = blurW, onValueChange = { blurW = it; selectedPreset = null }, valueRange = 0.02f..1f,
-                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                        // Height
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Box Height", fontSize = 12.sp, color = TextSecondary)
-                            Text("${(blurH * 100).toInt()}%", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Amber)
-                        }
-                        Slider(value = blurH, onValueChange = { blurH = it; selectedPreset = null }, valueRange = 0.02f..0.5f,
-                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                        // Blur intensity
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Blur Intensity / Radius", fontSize = 12.sp, color = TextSecondary)
-                            Text("$blurStrength", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Amber)
-                        }
-                        Slider(
-                            value = blurStrength.toFloat(),
-                            onValueChange = { blurStrength = it.toInt() },
-                            valueRange = 5f..50f,
-                            steps = 44,
-                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
-                        )
-                    }
-                }
-            }
-
-            // ── Generate Button ────────────────────────────────────────────
+            // ── Step 1: Start Dubbing Button ──────────────────────────────
             Button(
                 onClick = {
-                    // Delegate to MainActivity which starts the ForegroundService.
-                    // Heavy work (download, Whisper, FFmpegKit) MUST NOT run in
-                    // rememberCoroutineScope — Android 14 kills it when backgrounded.
                     try {
                         onStartPipeline(
                             PipelineParams(
+                                action         = "DUB",
                                 url            = urlInput.trim(),
                                 geminiKey      = geminiKey.trim(),
                                 voiceProfileId = selectedProfile.id,
@@ -658,17 +493,7 @@ fun RecapStudioScreen(
                                 voice          = selectedProfile.voiceId,
                                 voiceRate      = "${if (customRateSlider >= 0) "+" else ""}${customRateSlider.toInt()}%",
                                 voicePitch     = "${if (customPitchSlider >= 0) "+" else ""}${customPitchSlider.toInt()}Hz",
-                                voicePrompt    = customPersonaPrompt,
-                                soundStyle     = soundStyle.value,
-                                burnSubtitles  = burnSubtitles,
-                                subPlacement   = subtitlePlacement,
-                                fontScale      = fontScale,
-                                marginV        = marginV,
-                                speed          = playbackSpeed,
-                                blurEnabled    = blurEnabled,
-                                blurX          = blurX, blurY = blurY,
-                                blurW          = blurW, blurH = blurH,
-                                blurStrength   = blurStrength
+                                voicePrompt    = customPersonaPrompt
                             )
                         )
                     } catch (t: Throwable) {
@@ -676,22 +501,22 @@ fun RecapStudioScreen(
                     }
                 },
                 enabled = !isProcessing && urlInput.isNotBlank() && geminiKey.isNotBlank(),
-                modifier = Modifier.fillMaxWidth().height(56.dp),
+                modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Purple, disabledContainerColor = Border)
             ) {
-                if (isProcessing) {
+                if (isDubbing) {
                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(10.dp))
-                    Text("Processing On-Device...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("Dubbing & Transcribing Video...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 } else {
-                    Icon(Icons.Default.Bolt, contentDescription = null)
+                    Icon(Icons.Default.RecordVoiceOver, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("⚡ Generate Recap Video", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                    Text("🎙️ 1. Start Video Dubbing (ဒါဘင်စတင်ပြုလုပ်မည်)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
             }
 
-            // ── Progress Banner ────────────────────────────────────────────
+            // ── Processing Progress Banner ────────────────────────────────
             AnimatedVisibility(visible = isProcessing) {
                 ElevatedCard(shape = RoundedCornerShape(16.dp), colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF1E1B4B))) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -702,7 +527,6 @@ fun RecapStudioScreen(
                             color = Purple,
                             trackColor = PurpleDim.copy(alpha = 0.3f)
                         )
-                        // Stage log lines
                         if (pipelineState.logLines.size > 1) {
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                 pipelineState.logLines.takeLast(5).forEach { line ->
@@ -714,7 +538,350 @@ fun RecapStudioScreen(
                 }
             }
 
-            // ── Completion Banner with Inline Player ──────────────────────
+            // ── Step 2: Post-Dubbing Interactive Live Studio (Subtitles & Watermark Blur) ──
+            AnimatedVisibility(visible = isDubbedReady || isComposing || isCompleted) {
+                StudioCard(
+                    title = "2. Live Studio: Subtitles & Watermark Tuning (Live Preview)",
+                    icon = Icons.Default.Preview,
+                    accentColor = Cyan
+                ) {
+                    Text(
+                        "Video & voice are dubbed! Adjust your subtitle layout and logo blur box in real-time on the video preview below before generating the final video.",
+                        fontSize = 11.sp,
+                        color = TextSecondary
+                    )
+
+                    // ── INTERACTIVE LIVE PREVIEW BOX WITH REAL-TIME OVERLAYS ──
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(240.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.Black)
+                    ) {
+                        if (exoPlayer != null) {
+                            AndroidView(
+                                factory = { ctx ->
+                                    PlayerView(ctx).apply {
+                                        player = exoPlayer
+                                        useController = true
+                                    }
+                                },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                Text("Video player unavailable", color = TextMuted, fontSize = 12.sp)
+                            }
+                        }
+
+                        // Real-time Watermark Blur Box Overlay
+                        if (blurEnabled) {
+                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                val leftPx = maxWidth * blurX
+                                val topPx = maxHeight * blurY
+                                val widthPx = maxWidth * blurW
+                                val heightPx = maxHeight * blurH
+
+                                Box(
+                                    modifier = Modifier
+                                        .offset(x = leftPx, y = topPx)
+                                        .size(width = widthPx, height = heightPx)
+                                        .background(Amber.copy(alpha = 0.3f))
+                                        .border(1.5.dp, Amber, RoundedCornerShape(4.dp))
+                                        .padding(4.dp)
+                                ) {
+                                    Text(
+                                        text = "💧 Blur Area (${(blurW * 100).toInt()}% × ${(blurH * 100).toInt()}%)",
+                                        color = Amber,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                            }
+                        }
+
+                        // Real-time Subtitle Overlay
+                        if (burnSubtitles) {
+                            BoxWithConstraints(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 14.dp)
+                            ) {
+                                val vOffset = when (subtitlePlacement) {
+                                    "top" -> (marginV * 0.45f).dp
+                                    "bottom" -> (-marginV * 0.45f).dp
+                                    else -> 0.dp
+                                }
+                                val alignment = when (subtitlePlacement) {
+                                    "top" -> Alignment.TopCenter
+                                    "middle" -> Alignment.Center
+                                    else -> Alignment.BottomCenter
+                                }
+
+                                Surface(
+                                    modifier = Modifier
+                                        .align(alignment)
+                                        .offset(y = vOffset),
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Color.Black.copy(alpha = 0.8f)
+                                ) {
+                                    Text(
+                                        text = pipelineState.previewSubtitleText.ifBlank {
+                                            "မင်္ဂလာပါ... ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြချက် နမူနာစာတန်း"
+                                        },
+                                        color = Color.Yellow,
+                                        fontSize = (12 * fontScale).sp,
+                                        fontWeight = FontWeight.Bold,
+                                        textAlign = TextAlign.Center,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Border)
+
+                    // ── Subtitle Tuning Section ──
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Burn Burmese Subtitles", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("Render Padauk font with HarfBuzz OpenType shaping", fontSize = 10.sp, color = TextMuted)
+                        }
+                        Switch(
+                            checked = burnSubtitles,
+                            onCheckedChange = { burnSubtitles = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Green)
+                        )
+                    }
+
+                    if (burnSubtitles) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Placement Chips
+                            Text("Subtitle Placement / Position", fontSize = 11.sp, color = TextSecondary)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("bottom" to "Bottom (အောက်)", "top" to "Top (အပေါ်)", "middle" to "Middle (အလယ်)").forEach { (value, label) ->
+                                    FilterChip(
+                                        selected = subtitlePlacement == value,
+                                        onClick = { subtitlePlacement = value },
+                                        label = { Text(label, fontSize = 11.sp) },
+                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green, selectedLabelColor = Color.Black)
+                                    )
+                                }
+                            }
+
+                            // Font Scale Slider
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Font Size Scale", fontSize = 11.sp, color = TextSecondary)
+                                Text(String.format("%.2f×", fontScale), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
+                            }
+                            Slider(
+                                value = fontScale,
+                                onValueChange = { fontScale = it },
+                                valueRange = 0.7f..1.6f,
+                                steps = 17,
+                                colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
+                            )
+
+                            // Margin V Slider
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Vertical Edge Margin", fontSize = 11.sp, color = TextSecondary)
+                                Text("${marginV}px", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
+                            }
+                            Slider(
+                                value = marginV.toFloat(),
+                                onValueChange = { marginV = it.toInt() },
+                                valueRange = 10f..120f,
+                                steps = 21,
+                                colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Border)
+
+                    // ── Logo / Watermark Blur Section ──
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text("Enable Logo / Watermark Blur Box", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                            Text("Delogo frosted blur over old channel logos & TV bugs", fontSize = 10.sp, color = TextMuted)
+                        }
+                        Switch(
+                            checked = blurEnabled,
+                            onCheckedChange = { blurEnabled = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Amber)
+                        )
+                    }
+
+                    if (blurEnabled) {
+                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            // Presets
+                            Text("Quick Position Presets", fontSize = 11.sp, color = TextSecondary)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                BLUR_PRESETS.chunked(2).forEach { row ->
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        row.forEach { preset ->
+                                            FilterChip(
+                                                selected = selectedPreset == preset,
+                                                onClick = {
+                                                    selectedPreset = preset
+                                                    blurX = preset.x; blurY = preset.y
+                                                    blurW = preset.w; blurH = preset.h
+                                                },
+                                                label = { Text(preset.label, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                                modifier = Modifier.weight(1f),
+                                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Amber, selectedLabelColor = Color.Black)
+                                            )
+                                        }
+                                        if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+
+                            // X & Y Sliders
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Box Left X Position", fontSize = 11.sp, color = TextSecondary)
+                                Text("${(blurX * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                            }
+                            Slider(value = blurX, onValueChange = { blurX = it; selectedPreset = null }, valueRange = 0f..1f,
+                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Box Top Y Position", fontSize = 11.sp, color = TextSecondary)
+                                Text("${(blurY * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                            }
+                            Slider(value = blurY, onValueChange = { blurY = it; selectedPreset = null }, valueRange = 0f..1f,
+                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                            // Width & Height Sliders
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Box Width", fontSize = 11.sp, color = TextSecondary)
+                                Text("${(blurW * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                            }
+                            Slider(value = blurW, onValueChange = { blurW = it; selectedPreset = null }, valueRange = 0.02f..1f,
+                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Box Height", fontSize = 11.sp, color = TextSecondary)
+                                Text("${(blurH * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                            }
+                            Slider(value = blurH, onValueChange = { blurH = it; selectedPreset = null }, valueRange = 0.02f..0.5f,
+                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                            // Blur Intensity
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Blur Radius / Intensity", fontSize = 11.sp, color = TextSecondary)
+                                Text("$blurStrength", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                            }
+                            Slider(
+                                value = blurStrength.toFloat(),
+                                onValueChange = { blurStrength = it.toInt() },
+                                valueRange = 5f..50f,
+                                steps = 44,
+                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(color = Border)
+
+                    // ── Sound Design & Video Speed ──
+                    Text("Sound Design & Mastering Preset", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                    ExposedDropdownMenuBox(expanded = soundStyleExpanded, onExpandedChange = { soundStyleExpanded = it }) {
+                        OutlinedTextField(
+                            value = soundStyle.label,
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = soundStyleExpanded) },
+                            modifier = Modifier.fillMaxWidth().menuAnchor(),
+                            colors = textFieldColors(focusedBorderColor = Cyan),
+                            textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = TextPrimary)
+                        )
+                        ExposedDropdownMenu(
+                            expanded = soundStyleExpanded,
+                            onDismissRequest = { soundStyleExpanded = false },
+                            modifier = Modifier.background(BgCard)
+                        ) {
+                            SOUND_STYLES.forEach { style ->
+                                DropdownMenuItem(
+                                    text = { Text(style.label, fontSize = 13.sp, color = TextPrimary) },
+                                    onClick = { soundStyle = style; soundStyleExpanded = false }
+                                )
+                            }
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("Playback Speed", fontSize = 11.sp, color = TextSecondary)
+                        Surface(shape = RoundedCornerShape(6.dp), color = Amber.copy(alpha = 0.15f)) {
+                            Text(
+                                "${String.format("%.2f", playbackSpeed)}×",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber
+                            )
+                        }
+                    }
+                    Slider(
+                        value = playbackSpeed,
+                        onValueChange = { playbackSpeed = it },
+                        valueRange = 0.5f..2.0f,
+                        steps = 5,
+                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                    )
+
+                    HorizontalDivider(color = Border)
+
+                    // ── GENERATE FINAL VIDEO BUTTON ──
+                    Button(
+                        onClick = {
+                            try {
+                                onStartPipeline(
+                                    PipelineParams(
+                                        action        = "COMPOSE",
+                                        soundStyle    = soundStyle.value,
+                                        burnSubtitles = burnSubtitles,
+                                        subPlacement  = subtitlePlacement,
+                                        fontScale     = fontScale,
+                                        marginV       = marginV,
+                                        speed         = playbackSpeed,
+                                        blurEnabled   = blurEnabled,
+                                        blurX         = blurX, blurY = blurY,
+                                        blurW         = blurW, blurH = blurH,
+                                        blurStrength  = blurStrength
+                                    )
+                                )
+                            } catch (t: Throwable) {
+                                t.printStackTrace()
+                            }
+                        },
+                        enabled = !isComposing,
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black, disabledContainerColor = Border)
+                    ) {
+                        if (isComposing) {
+                            CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Text("Rendering Final Video (FFmpeg)...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        } else {
+                            Icon(Icons.Default.MovieCreation, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("🎬 2. Generate Final Video (ရုပ်ရှင်အပြီးသတ်ထုတ်ယူမည်)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        }
+                    }
+                }
+            }
+
+            // ── Completion Banner with Gallery Export Info ────────────────
             AnimatedVisibility(
                 visible = pipelineState.stage == PipelineStage.COMPLETED && pipelineState.finalVideoUri != null
             ) {
@@ -724,30 +891,6 @@ fun RecapStudioScreen(
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Green)
                             Text("Recap Video Ready!", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-                        }
-
-                        // Inline ExoPlayer video preview
-                        if (exoPlayer != null) {
-                            pipelineState.finalVideoUri?.let { uri ->
-                                LaunchedEffect(uri) {
-                                    try {
-                                        exoPlayer.setMediaItem(MediaItem.fromUri(uri))
-                                        exoPlayer.prepare()
-                                    } catch (_: Throwable) {}
-                                }
-                                AndroidView(
-                                    factory = { ctx ->
-                                        PlayerView(ctx).apply {
-                                            player = exoPlayer
-                                            useController = true
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(220.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                )
-                            }
                         }
 
                         Text(
