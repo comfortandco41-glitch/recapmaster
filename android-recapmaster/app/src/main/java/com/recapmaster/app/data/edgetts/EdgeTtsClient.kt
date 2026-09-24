@@ -54,12 +54,84 @@ class EdgeTtsClient {
         rate: String = "+0%",
         pitch: String = "+0Hz"
     ): File = withContext(Dispatchers.IO) {
-        val audioBytes = fetchAudioStream(text, voiceName, rate, pitch)
+        val chunks = splitTextIntoChunks(text, maxChunkLength = 350)
+        val combinedAudio = ByteArrayOutputStream()
+
+        for (chunk in chunks) {
+            val trimmed = chunk.trim()
+            if (trimmed.isEmpty()) continue
+
+            var chunkAudio: ByteArray? = null
+            var lastErr: Exception? = null
+
+            // Retry up to 2 times per chunk
+            for (attempt in 1..2) {
+                try {
+                    chunkAudio = fetchAudioStream(trimmed, voiceName, rate, pitch)
+                    if (chunkAudio.isNotEmpty()) break
+                } catch (e: Exception) {
+                    lastErr = e
+                    kotlinx.coroutines.delay(300)
+                }
+            }
+
+            if (chunkAudio != null && chunkAudio.isNotEmpty()) {
+                combinedAudio.write(chunkAudio)
+            } else if (lastErr != null && chunks.size == 1) {
+                throw lastErr
+            }
+        }
+
+        val allBytes = combinedAudio.toByteArray()
+        if (allBytes.isEmpty()) {
+            throw IllegalStateException("Edge TTS finished but returned no audio data")
+        }
+
         outputFile.parentFile?.mkdirs()
         FileOutputStream(outputFile).use { fos ->
-            fos.write(audioBytes)
+            fos.write(allBytes)
         }
         outputFile
+    }
+
+    private fun splitTextIntoChunks(text: String, maxChunkLength: Int = 350): List<String> {
+        val cleaned = text.trim()
+        if (cleaned.length <= maxChunkLength) return listOf(cleaned)
+
+        // Split on Burmese sentence delimiter '။', newline, or punctuation
+        val regex = Regex("(?<=[။\n.!?])\\s*")
+        val sentences = cleaned.split(regex).map { it.trim() }.filter { it.isNotEmpty() }
+
+        val chunks = mutableListOf<String>()
+        var currentChunk = StringBuilder()
+
+        for (sentence in sentences) {
+            if (currentChunk.isNotEmpty() && (currentChunk.length + sentence.length > maxChunkLength)) {
+                chunks.add(currentChunk.toString().trim())
+                currentChunk = StringBuilder()
+            }
+            if (sentence.length > maxChunkLength) {
+                // If a single sentence exceeds maxChunkLength, split by Burmese comma '၊' or space
+                val subParts = sentence.split(Regex("(?<=[,၊ ])\\s*"))
+                for (part in subParts) {
+                    if (currentChunk.isNotEmpty() && (currentChunk.length + part.length > maxChunkLength)) {
+                        chunks.add(currentChunk.toString().trim())
+                        currentChunk = StringBuilder()
+                    }
+                    if (currentChunk.isNotEmpty()) currentChunk.append(" ")
+                    currentChunk.append(part)
+                }
+            } else {
+                if (currentChunk.isNotEmpty()) currentChunk.append(" ")
+                currentChunk.append(sentence)
+            }
+        }
+
+        if (currentChunk.isNotEmpty()) {
+            chunks.add(currentChunk.toString().trim())
+        }
+
+        return if (chunks.isEmpty()) listOf(cleaned) else chunks
     }
 
     private suspend fun fetchAudioStream(

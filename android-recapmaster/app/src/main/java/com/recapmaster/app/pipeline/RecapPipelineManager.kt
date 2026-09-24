@@ -148,8 +148,19 @@ class RecapPipelineManager(private val context: Context) {
             log("🌏 [4/5] Translating & generating Burmese recap narration via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
-            val narrationScript = geminiClient.generateRecapScript(burmeseTranscript)
-            log("✅ Burmese recap script generated", progress = 0.65f)
+            val videoDuration = if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
+            val narrationScript = geminiClient.generateRecapScript(burmeseTranscript, videoDuration)
+
+            val dialogueText = extractAllDialogueTexts(burmeseTranscript)
+            val scriptToDub = if (narrationScript.isNotBlank() && narrationScript.length >= 40) {
+                narrationScript
+            } else if (dialogueText.isNotBlank()) {
+                dialogueText
+            } else {
+                narrationScript
+            }
+
+            log("✅ Full Burmese recap script prepared (${scriptToDub.split(" ", "။").filter { it.isNotBlank() }.size} words for ${videoDuration.toInt()}s video)", progress = 0.65f)
 
             // Stage 5: Voice Dubbing (Gemini AI Voice or Edge TTS)
             log("🔊 [5/5] Synthesizing Burmese voice (${voiceProfile.name}) via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
@@ -157,7 +168,7 @@ class RecapPipelineManager(private val context: Context) {
                 try {
                     geminiTtsClient.synthesizeSpeech(
                         apiKey = geminiApiKey,
-                        text = narrationScript,
+                        text = scriptToDub,
                         outputFile = voiceAudio,
                         profile = voiceProfile
                     )
@@ -165,7 +176,7 @@ class RecapPipelineManager(private val context: Context) {
                 } catch (e: Exception) {
                     log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f)
                     edgeTtsClient.synthesizeSpeech(
-                        text = narrationScript,
+                        text = scriptToDub,
                         outputFile = voiceAudio,
                         voiceName = "my-MM-ThihaNeural",
                         rate = voiceProfile.rate.ifBlank { "+10%" },
@@ -175,7 +186,7 @@ class RecapPipelineManager(private val context: Context) {
                 }
             } else {
                 edgeTtsClient.synthesizeSpeech(
-                    text = narrationScript,
+                    text = scriptToDub,
                     outputFile = voiceAudio,
                     voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
                     rate = voiceProfile.rate.ifBlank { "+10%" },
@@ -346,6 +357,22 @@ class RecapPipelineManager(private val context: Context) {
             }
         } catch (_: Throwable) {}
         return "ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြချက် နမူနာစာတန်း"
+    }
+
+    private fun extractAllDialogueTexts(burmeseTranscript: String): String {
+        try {
+            val root = org.json.JSONObject(burmeseTranscript)
+            val segs = root.optJSONArray("segments")
+            if (segs != null && segs.length() > 0) {
+                val list = mutableListOf<String>()
+                for (i in 0 until segs.length()) {
+                    val t = segs.getJSONObject(i).optString("text", "").trim()
+                    if (t.isNotBlank()) list.add(t)
+                }
+                if (list.isNotEmpty()) return list.joinToString(" ")
+            }
+        } catch (_: Throwable) {}
+        return ""
     }
 
     fun reset() {
