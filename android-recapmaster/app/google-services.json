@@ -12,7 +12,20 @@
           "package_name": "com.recapmaster.app"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "728125206973-o5a8i5abh95bj5nci0p4vrjh0rim13c7.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.recapmaster.app",
+            "certificate_hash": "b41fe8487e48a1d1cb3bef16418840e8c8a6264c"
+          }
+        },
+        {
+          "client_id": "728125206973-mmc063962g7l9r4n6q701q5h6g4e5hip.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyA5f0k8iE47bPKZBMXcGeuGBEqRc9bz60Q"
@@ -20,7 +33,12 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "728125206973-mmc063962g7l9r4n6q701q5h6g4e5hip.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
         }
       }
     }
