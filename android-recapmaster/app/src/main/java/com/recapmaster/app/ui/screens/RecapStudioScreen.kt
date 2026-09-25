@@ -715,9 +715,9 @@ fun RecapStudioScreen(
                     else -> "Processing..."
                 }
 
-                ElevatedCard(
+                Card(
                     shape = RoundedCornerShape(16.dp),
-                    colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF131127)),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF131127)),
                     border = androidx.compose.foundation.BorderStroke(1.dp, PurpleDim.copy(alpha = 0.5f))
                 ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
