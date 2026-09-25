@@ -1,6 +1,7 @@
 package com.recapmaster.app.engine
 
 import android.content.Context
+import android.media.MediaMetadataRetriever
 import com.arthenica.ffmpegkit.FFmpegKit
 import com.arthenica.ffmpegkit.ReturnCode
 import kotlinx.coroutines.Dispatchers
@@ -20,6 +21,46 @@ data class BlurBoxConfig(
 )
 
 class FFmpegEngine(private val context: Context) {
+
+    /**
+     * Accurately extracts video dimensions (accounting for orientation rotation).
+     */
+    fun getVideoDimensions(videoFile: File): Pair<Int, Int> {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(videoFile.absolutePath)
+            val wStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+            val hStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+            val rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+            var w = wStr?.toIntOrNull() ?: 1280
+            var h = hStr?.toIntOrNull() ?: 720
+            val rotation = rotationStr?.toIntOrNull() ?: 0
+            if (rotation == 90 || rotation == 270) {
+                val tmp = w; w = h; h = tmp
+            }
+            Pair(w.coerceAtLeast(16), h.coerceAtLeast(16))
+        } catch (_: Throwable) {
+            Pair(1280, 720)
+        } finally {
+            try { retriever.release() } catch (_: Throwable) {}
+        }
+    }
+
+    /**
+     * Extracts media duration in seconds via MediaMetadataRetriever.
+     */
+    fun getMediaDurationSeconds(file: File): Double {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(file.absolutePath)
+            val durMs = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            durMs / 1000.0
+        } catch (_: Throwable) {
+            0.0
+        } finally {
+            try { retriever.release() } catch (_: Throwable) {}
+        }
+    }
 
     /**
      * Maps a sound style preset name to an FFmpeg audio filter chain.
@@ -126,10 +167,24 @@ class FFmpegEngine(private val context: Context) {
         }
 
         if (hasBlur) {
-            val bx = (blurBox.xPct * 1280).toInt().coerceAtLeast(0)
-            val by = (blurBox.yPct * 720).toInt().coerceAtLeast(0)
-            val bw = (blurBox.wPct * 1280).toInt().let { if (it % 2 != 0) it - 1 else it }.coerceAtLeast(4)
-            val bh = (blurBox.hPct * 720).toInt().let { if (it % 2 != 0) it - 1 else it }.coerceAtLeast(4)
+            val (vidW, vidH) = getVideoDimensions(sourceVideo)
+            val xPct = (if (blurBox.xPct > 1.0f) blurBox.xPct / 100f else blurBox.xPct).coerceIn(0f, 1f)
+            val yPct = (if (blurBox.yPct > 1.0f) blurBox.yPct / 100f else blurBox.yPct).coerceIn(0f, 1f)
+            val wPct = (if (blurBox.wPct > 1.0f) blurBox.wPct / 100f else blurBox.wPct).coerceIn(0.01f, 1f)
+            val hPct = (if (blurBox.hPct > 1.0f) blurBox.hPct / 100f else blurBox.hPct).coerceIn(0.01f, 1f)
+
+            var bw = (wPct * vidW).toInt().coerceIn(4, vidW)
+            var bh = (hPct * vidH).toInt().coerceIn(4, vidH)
+            if (bw % 2 != 0) bw -= 1
+            if (bh % 2 != 0) bh -= 1
+            bw = bw.coerceAtLeast(4)
+            bh = bh.coerceAtLeast(4)
+
+            val maxX = (vidW - bw).coerceAtLeast(0)
+            val maxY = (vidH - bh).coerceAtLeast(0)
+            val bx = (xPct * vidW).toInt().coerceIn(0, maxX)
+            val by = (yPct * vidH).toInt().coerceIn(0, maxY)
+
             val str = blurBox.strength.coerceIn(3, 50)
             val nextV = if (hasSubs) "v_blur" else "v_out"
             videoParts.add(
@@ -149,28 +204,40 @@ class FFmpegEngine(private val context: Context) {
         val hasVideoFilter = videoParts.isNotEmpty()
         val videoFilterStr = videoParts.joinToString(";")
 
-        // ── Audio filter chain (dubbed voice + sound style EQ + apad padding) ───────────
+        // ── Audio filter chain (dubbed voice + tempo pacing + sound style EQ + apad padding) ──
+        val vidDur = getMediaDurationSeconds(sourceVideo)
+        val audDur = getMediaDurationSeconds(dubbedVoiceAudio)
+        val targetVideoDur = if (vidDur > 0) vidDur / speed else 0.0
+
+        // If audio duration is moderately shorter than video duration, gently stretch tempo so narration spans the whole video
+        val stretchFactor = if (targetVideoDur > 1.0 && audDur > 1.0 && audDur < targetVideoDur) {
+            val ratio = (audDur / targetVideoDur).toFloat()
+            if (ratio in 0.70f..0.98f) ratio.coerceIn(0.75f, 1.0f) else 1.0f
+        } else {
+            1.0f
+        }
+
+        val effectiveAudioSpeed = speed * stretchFactor
+        val effectiveHasSpeed = hasSpeed || kotlin.math.abs(effectiveAudioSpeed - 1.0f) > 0.01f
+
         // Build atempo chain (handles speeds outside 0.5–2.0 range by chaining)
         val atempoStr: String = when {
-            speed >= 0.5f && speed <= 2.0f ->
-                String.format(java.util.Locale.US, "atempo=%.4f", speed)
-            speed > 2.0f ->
-                String.format(java.util.Locale.US, "atempo=2.0,atempo=%.4f", speed / 2.0f)
+            effectiveAudioSpeed >= 0.5f && effectiveAudioSpeed <= 2.0f ->
+                String.format(java.util.Locale.US, "atempo=%.4f", effectiveAudioSpeed)
+            effectiveAudioSpeed > 2.0f ->
+                String.format(java.util.Locale.US, "atempo=2.0,atempo=%.4f", effectiveAudioSpeed / 2.0f)
             else ->
-                String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", speed * 2.0f)
+                String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", effectiveAudioSpeed * 2.0f)
         }
 
         // ── Assemble final FFmpeg command ─────────────────────────────────
-        val cmd: String = if (hasSpeed) {
-            val audioPart = "[1:a]${atempoStr},${audioEq},apad[a_out]"
-            val fullFilter = if (hasVideoFilter) "$videoFilterStr;$audioPart" else audioPart
-            "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
-                "-filter_complex \"$fullFilter\" " +
-                "-map \"[${if (hasVideoFilter) currentV else "0:v:0"}]\" -map \"[a_out]\" " +
-                "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
-                "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
-        } else if (hasVideoFilter) {
-            val audioPart = "[1:a]${audioEq},apad[a_out]"
+        val audioPart = if (effectiveHasSpeed) {
+            "[1:a]${atempoStr},${audioEq},apad[a_out]"
+        } else {
+            "[1:a]${audioEq},apad[a_out]"
+        }
+
+        val cmd: String = if (hasVideoFilter) {
             val fullFilter = "$videoFilterStr;$audioPart"
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$fullFilter\" " +
@@ -178,7 +245,6 @@ class FFmpegEngine(private val context: Context) {
                 "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
                 "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
         } else {
-            val audioPart = "[1:a]${audioEq},apad[a_out]"
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$audioPart\" " +
                 "-map 0:v:0 -map \"[a_out]\" " +

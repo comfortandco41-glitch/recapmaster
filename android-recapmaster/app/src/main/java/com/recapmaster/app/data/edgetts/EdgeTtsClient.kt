@@ -54,31 +54,35 @@ class EdgeTtsClient {
         rate: String = "+0%",
         pitch: String = "+0Hz"
     ): File = withContext(Dispatchers.IO) {
-        val chunks = splitTextIntoChunks(text, maxChunkLength = 350)
+        val chunks = splitTextIntoChunks(text, maxChunkLength = 1200)
         val combinedAudio = ByteArrayOutputStream()
 
-        for (chunk in chunks) {
+        for ((index, chunk) in chunks.withIndex()) {
             val trimmed = chunk.trim()
             if (trimmed.isEmpty()) continue
 
             var chunkAudio: ByteArray? = null
             var lastErr: Exception? = null
 
-            // Retry up to 2 times per chunk
-            for (attempt in 1..2) {
+            // Retry up to 3 times per chunk with backoff
+            for (attempt in 1..3) {
                 try {
                     chunkAudio = fetchAudioStream(trimmed, voiceName, rate, pitch)
                     if (chunkAudio.isNotEmpty()) break
                 } catch (e: Exception) {
                     lastErr = e
-                    kotlinx.coroutines.delay(300)
+                    kotlinx.coroutines.delay(400L * attempt)
                 }
             }
 
             if (chunkAudio != null && chunkAudio.isNotEmpty()) {
                 combinedAudio.write(chunkAudio)
-            } else if (lastErr != null && chunks.size == 1) {
-                throw lastErr
+            } else {
+                throw lastErr ?: IllegalStateException("Failed to synthesize audio chunk ${index + 1}/${chunks.size}")
+            }
+
+            if (index < chunks.size - 1) {
+                kotlinx.coroutines.delay(150)
             }
         }
 
@@ -94,7 +98,7 @@ class EdgeTtsClient {
         outputFile
     }
 
-    private fun splitTextIntoChunks(text: String, maxChunkLength: Int = 350): List<String> {
+    private fun splitTextIntoChunks(text: String, maxChunkLength: Int = 1200): List<String> {
         val cleaned = text.trim()
         if (cleaned.length <= maxChunkLength) return listOf(cleaned)
 

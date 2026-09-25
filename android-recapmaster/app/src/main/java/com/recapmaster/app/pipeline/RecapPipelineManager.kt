@@ -149,7 +149,11 @@ class RecapPipelineManager(private val context: Context) {
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
             val videoDuration = if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
-            val narrationScript = geminiClient.generateRecapScript(burmeseTranscript, videoDuration)
+            val narrationScript = geminiClient.generateRecapScript(
+                burmeseTranscript = burmeseTranscript,
+                videoDurationSeconds = videoDuration,
+                videoTitle = downloadRes.title
+            )
 
             val dialogueText = extractAllDialogueTexts(burmeseTranscript)
             val scriptToDub = if (narrationScript.isNotBlank() && narrationScript.length >= 40) {
@@ -265,10 +269,13 @@ class RecapPipelineManager(private val context: Context) {
             // Subtitle Generation (.ass)
             val fontsDir = File(context.filesDir, "fonts").apply { mkdirs() }
             ensurePadaukFont(fontsDir)
+            val (vidW, vidH) = ffmpegEngine.getVideoDimensions(sourceVideo)
             val assFileToUse: File? = if (burnSubtitles && !burmeseTranscript.isNullOrBlank()) {
                 SubtitleGenerator.generateAssFile(
                     transcriptJson = burmeseTranscript,
                     outputAssFile = assSubtitles,
+                    videoWidth = vidW,
+                    videoHeight = vidH,
                     placement = subtitlePlacement,
                     fontScale = fontScale,
                     marginV = marginV

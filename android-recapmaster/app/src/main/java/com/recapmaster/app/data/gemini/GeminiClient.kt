@@ -33,30 +33,41 @@ $transcriptJson
         callGemini(prompt)
     }
 
-    suspend fun generateRecapScript(burmeseTranscript: String, videoDurationSeconds: Double = 60.0): String = withContext(Dispatchers.IO) {
+    suspend fun generateRecapScript(
+        burmeseTranscript: String,
+        videoDurationSeconds: Double = 60.0,
+        videoTitle: String = ""
+    ): String = withContext(Dispatchers.IO) {
         val durationSec = if (videoDurationSeconds > 0) videoDurationSeconds.toInt() else 60
         // Natural Burmese speech rate is ~2.2 words per second (130 words per minute)
-        val targetWords = (durationSec * 2.2).toInt().coerceAtLeast(80)
+        // Burmese sentences average 10-15 words, each taking ~5-7 seconds to speak naturally.
+        val targetSentences = (durationSec / 5.5).toInt().coerceAtLeast(10)
+        val targetWords = (durationSec * 2.2).toInt().coerceAtLeast(120)
 
         val prompt = """
-You are a master movie recap creator and voiceover narrator in Burmese (ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြသူ).
-Write a continuous, engaging, cinematic movie recap narration script in Burmese based on the following transcript.
+You are an expert cinematic movie recap narrator in Burmese (မြန်မာဘာသာ ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြသူ).
+Write a continuous, engaging, dramatic, and detailed Burmese recap narration script that covers the ENTIRE duration of the video.
 
 CRITICAL DURATION & STORY PACING REQUIREMENTS:
-1. FULL VIDEO DURATION MATCHING:
-   - The source video is exactly $durationSec seconds long.
-   - You MUST generate enough narration script to span the FULL $durationSec seconds from the beginning to the very end of the video.
-   - Target word count: AT LEAST $targetWords Burmese words (approximately ${(durationSec / 10).coerceAtLeast(4)} full Burmese sentences).
-   - Do NOT just write a short summary. Walk the listener through each scene and dialogue beat across the entire timeline (beginning scenes, middle developments, conflicts, climax, and ending).
-2. NO INTRO GREETINGS:
-   - Start directly with the story action.
-   - Do NOT include any greetings or intros (no "မင်္ဂလာပါ", "ဒီဗီဒီယိုမှာတော့", "ကျွန်တော့် channel မှ ကြိုဆိုပါတယ်", "ယနေ့တော့", or similar intro text).
-3. CINEMATIC NARRATION STYLE:
-   - Write in natural, immersive, dynamic, suspenseful Burmese (မြန်မာဘာသာ).
-4. PURE TEXT OUTPUT:
-   - Output ONLY the spoken narration text. No markdown, titles, timestamps, or headers.
+1. VIDEO CONTEXT & FULL DURATION:
+   - Video Title / Topic: "${videoTitle.ifBlank { "Movie / Video Recap" }}"
+   - Source Video Duration: Exactly $durationSec seconds (approx. ${durationSec / 60}m ${durationSec % 60}s).
+   - MANDATORY: The narration MUST span the ENTIRE $durationSec seconds from start to the very end of the video.
+   - Do NOT stop early! Even if the dialogue transcript ends early or only covers the first part of the video, you MUST continue narrating the complete storyline, character actions, emotional reactions, dramatic turning point, climax, and heartwarming/concluding moral message all the way to the final seconds ($durationSec s).
 
-Transcript segments across the video:
+2. REQUIRED SCRIPT LENGTH & STRUCTURE:
+   - Target word count: AT LEAST $targetWords Burmese words (minimum $targetSentences complete Burmese sentences ending with '။').
+   - Structure the narration across 3 distinct timeline acts so the story flows continuously:
+     * Beginning (0s - 30%): Introduce the scene, characters, setting, and initial conflict or encounter.
+     * Middle (30% - 70%): Describe the unfolding drama, actions, challenges, emotions, and key interactions.
+     * Climax & Ending (70% - 100%): Describe the peak emotional moment, resolution, bond, gratitude, and final conclusion right up to the end of the video ($durationSec seconds).
+
+3. SCRIPT FORMAT RULES:
+   - Start immediately with the story action. NO greetings, NO intros (NO "မင်္ဂလာပါ", NO "ဒီဗီဒီယိုမှာတော့", NO "ယနေ့တော့", NO channel welcome).
+   - Write in immersive, cinematic, natural spoken Burmese (မြန်မာစကားပြော ပြန်လည်ပြောပြချက်).
+   - Output ONLY the spoken Burmese narration text. No markdown, titles, timestamps, or headers.
+
+Dialogue transcript segments from the video:
 $burmeseTranscript
         """.trimIndent()
 
@@ -64,7 +75,7 @@ $burmeseTranscript
     }
 
     private fun callGemini(promptText: String): String {
-        val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=$apiKey"
+        val candidateModels = listOf("gemini-3.6-flash", "gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash")
 
         val jsonBody = JSONObject().apply {
             put("contents", JSONArray().apply {
@@ -75,34 +86,48 @@ $burmeseTranscript
                 })
             })
             put("generationConfig", JSONObject().apply {
-                put("temperature", 0.4)
-                put("maxOutputTokens", 4096)
+                put("temperature", 0.5)
+                put("maxOutputTokens", 8192)
             })
         }
 
-        val request = Request.Builder()
-            .url(endpoint)
-            .post(jsonBody.toString().toRequestBody(jsonMedia))
-            .build()
+        var lastErr: Exception? = null
 
-        client.newCall(request).execute().use { response ->
-            if (!response.isSuccessful) {
-                val errorBody = response.body?.string() ?: "Empty body"
-                throw RuntimeException("Gemini API call failed (HTTP ${response.code}): $errorBody")
-            }
+        for (model in candidateModels) {
+            val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+            val request = Request.Builder()
+                .url(endpoint)
+                .post(jsonBody.toString().toRequestBody(jsonMedia))
+                .build()
 
-            val respString = response.body?.string() ?: ""
-            val jsonResp = JSONObject(respString)
-            val candidates = jsonResp.optJSONArray("candidates")
-            if (candidates != null && candidates.length() > 0) {
-                val first = candidates.getJSONObject(0)
-                val content = first.optJSONObject("content")
-                val parts = content?.optJSONArray("parts")
-                if (parts != null && parts.length() > 0) {
-                    return parts.getJSONObject(0).optString("text", "").trim()
+            try {
+                client.newCall(request).execute().use { response ->
+                    if (response.isSuccessful) {
+                        val respString = response.body?.string() ?: ""
+                        val jsonResp = JSONObject(respString)
+                        val candidates = jsonResp.optJSONArray("candidates")
+                        if (candidates != null && candidates.length() > 0) {
+                            val first = candidates.getJSONObject(0)
+                            val content = first.optJSONObject("content")
+                            val parts = content?.optJSONArray("parts")
+                            if (parts != null && parts.length() > 0) {
+                                return parts.getJSONObject(0).optString("text", "").trim()
+                            }
+                        }
+                    } else if (response.code in listOf(400, 403, 404)) {
+                        val errorBody = response.body?.string() ?: ""
+                        lastErr = RuntimeException("Gemini model $model returned HTTP ${response.code}: $errorBody")
+                        // Continue to next candidate model
+                    } else {
+                        val errorBody = response.body?.string() ?: ""
+                        lastErr = RuntimeException("Gemini API call failed (HTTP ${response.code}): $errorBody")
+                    }
                 }
+            } catch (e: Exception) {
+                lastErr = e
             }
-            throw RuntimeException("No text candidates found in Gemini response")
         }
+
+        throw lastErr ?: RuntimeException("Gemini API call failed across all candidate models")
     }
 }

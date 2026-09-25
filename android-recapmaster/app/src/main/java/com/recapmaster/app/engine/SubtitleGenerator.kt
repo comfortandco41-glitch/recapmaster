@@ -33,7 +33,8 @@ object SubtitleGenerator {
             else -> 2 // bottom center
         }
 
-        val fontSize = (videoHeight * 0.045 * fontScale).toInt().coerceAtLeast(16)
+        val baseDim = kotlin.math.min(videoWidth, videoHeight)
+        val fontSize = (baseDim * 0.05 * fontScale).toInt().coerceAtLeast(16)
 
         val header = """
 [Script Info]
