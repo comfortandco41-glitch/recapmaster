@@ -201,6 +201,42 @@ class FFmpegEngine(private val context: Context) {
     }
 
     /**
+     * Stretches or compresses dialogue audio using atempo, pads with silence, and trims with -t
+     * so that the resulting WAV matches the target duration of the original SRT segment 100% exactly.
+     */
+    suspend fun fitSegmentExactDuration(
+        inputAudio: File,
+        outputWav: File,
+        targetDurationSeconds: Double
+    ): File = withContext(Dispatchers.IO) {
+        outputWav.parentFile?.mkdirs()
+        val rawDur = getMediaDurationSeconds(inputAudio)
+        val targetDur = targetDurationSeconds.coerceAtLeast(0.2)
+
+        val speed = if (rawDur > 0.05) {
+            (rawDur / targetDur).toFloat().coerceIn(0.5f, 2.5f)
+        } else {
+            1.0f
+        }
+
+        val atempoStr = when {
+            speed in 0.5f..2.0f -> String.format(java.util.Locale.US, "atempo=%.4f", speed)
+            speed > 2.0f -> String.format(java.util.Locale.US, "atempo=2.0,atempo=%.4f", speed / 2.0f)
+            else -> String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", speed * 2.0f)
+        }
+
+        val padStr = String.format(java.util.Locale.US, "apad=whole_dur=%.3f", targetDur)
+        val tArg = String.format(java.util.Locale.US, "-t %.3f", targetDur)
+
+        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$atempoStr,$padStr\" $tArg -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
+        executeFfmpeg(cmd)
+        if (!outputWav.exists() || outputWav.length() == 0L) {
+            throw RuntimeException("Exact duration audio fit failed for ${inputAudio.name}")
+        }
+        outputWav
+    }
+
+    /**
      * Concatenates an ordered list of audio and silence files into a single unified track.
      */
     suspend fun concatAudioFiles(

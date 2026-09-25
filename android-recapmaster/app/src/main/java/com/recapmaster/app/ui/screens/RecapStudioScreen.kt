@@ -110,7 +110,7 @@ fun RecapStudioScreen(
     var customPitchSlider by remember { mutableFloatStateOf(-2f) }
     var customPersonaPrompt by remember { mutableStateOf("") }
     var showFineTune    by remember { mutableStateOf(false) }
-    var dubbingMode     by remember { mutableStateOf("DIALOGUE_SYNC") } // "DIALOGUE_SYNC" | "STORY_RECAP"
+    var dubbingMode     by remember { mutableStateOf("EXACT_SRT_SYNC") } // "EXACT_SRT_SYNC" | "DIALOGUE_SYNC" | "STORY_RECAP"
 
     // In-app voice audition state
     var isAuditioning   by remember { mutableStateOf(false) }
@@ -483,28 +483,36 @@ fun RecapStudioScreen(
                 Text("Dubbing Timing & Scene Alignment Mode", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    FilterChip(
+                        selected = dubbingMode == "EXACT_SRT_SYNC",
+                        onClick = { dubbingMode = "EXACT_SRT_SYNC" },
+                        label = { Text("🎯 Exact SRT Sync", fontSize = 10.sp, fontWeight = if (dubbingMode == "EXACT_SRT_SYNC") FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Cyan, selectedLabelColor = Color.Black),
+                        modifier = Modifier.weight(1f)
+                    )
                     FilterChip(
                         selected = dubbingMode == "DIALOGUE_SYNC",
                         onClick = { dubbingMode = "DIALOGUE_SYNC" },
-                        label = { Text("🎯 Scene Dialogue Sync (အသံကိုက်)", fontSize = 11.sp, fontWeight = if (dubbingMode == "DIALOGUE_SYNC") FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Cyan, selectedLabelColor = Color.Black),
+                        label = { Text("🎬 Scene Flow", fontSize = 10.sp, fontWeight = if (dubbingMode == "DIALOGUE_SYNC") FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green, selectedLabelColor = Color.Black),
                         modifier = Modifier.weight(1f)
                     )
                     FilterChip(
                         selected = dubbingMode == "STORY_RECAP",
                         onClick = { dubbingMode = "STORY_RECAP" },
-                        label = { Text("📖 Story Recap (ဇာတ်လမ်းပြော)", fontSize = 11.sp, fontWeight = if (dubbingMode == "STORY_RECAP") FontWeight.Bold else FontWeight.Normal) },
+                        label = { Text("📖 Story Recap", fontSize = 10.sp, fontWeight = if (dubbingMode == "STORY_RECAP") FontWeight.Bold else FontWeight.Normal) },
                         colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Purple, selectedLabelColor = Color.White),
                         modifier = Modifier.weight(1f)
                     )
                 }
                 Text(
-                    text = if (dubbingMode == "DIALOGUE_SYNC")
-                        "⚡ Syncs Burmese speech directly to each actor's dialogue timestamps. Scene pauses are preserved."
-                    else
-                        "✨ Continuous narrator story recap explaining the movie from start to end.",
+                    text = when (dubbingMode) {
+                        "EXACT_SRT_SYNC" -> "🎯 1:1 Exact SRT sync: Burmese audio is tempo-fitted to match the EXACT duration of each original dialogue line. Starts and ends at exact timestamps."
+                        "DIALOGUE_SYNC" -> "🎬 Scene Flow: Merges close utterances for natural conversational cadence while preserving scene pauses."
+                        else -> "📖 Story Recap: Continuous narrator story recap explaining the movie from start to end."
+                    },
                     fontSize = 10.sp,
                     color = TextMuted
                 )

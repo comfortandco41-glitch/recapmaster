@@ -160,8 +160,20 @@ class RecapPipelineManager(private val context: Context) {
             val dialogueSegments = parseDialogueSegments(burmeseTranscript)
             val mergedSegments = mergeCloseDialogueSegments(dialogueSegments)
 
-            // Stage 5: Voice Dubbing (Scene Dialogue Sync vs Story Recap Narration)
-            if (dubbingMode == "DIALOGUE_SYNC" && mergedSegments.isNotEmpty()) {
+            // Stage 5: Voice Dubbing (Exact SRT Sync vs Scene Flow vs Story Recap)
+            if (dubbingMode == "EXACT_SRT_SYNC" && dialogueSegments.isNotEmpty()) {
+                log("🔊 [5/5] Synthesizing exact SRT timestamp dubbing (${dialogueSegments.size} segments) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                synthesizeExactTimestampDubbedAudio(
+                    segments = dialogueSegments,
+                    videoDuration = videoDuration,
+                    voiceProfile = voiceProfile,
+                    geminiApiKey = geminiApiKey,
+                    workDir = workDir,
+                    outputAudioFile = voiceAudio,
+                    onProgress = { p, msg -> log(msg, progress = p) }
+                )
+                log("✅ Exact SRT timestamp dubbing generated (1:1 duration match)", progress = 0.82f)
+            } else if (dubbingMode == "DIALOGUE_SYNC" && mergedSegments.isNotEmpty()) {
                 log("🔊 [5/5] Synthesizing scene-aligned dialogue (${mergedSegments.size} scenes) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
                 synthesizeDialogueDubbedAudio(
                     segments = mergedSegments,
@@ -514,6 +526,88 @@ class RecapPipelineManager(private val context: Context) {
         }
 
         // 5. Concatenate all audio and silence files into a single unified synchronized audio track
+        audioListFile.writeText(listEntries.joinToString("\n") { it }, Charsets.UTF_8)
+        ffmpegEngine.concatAudioFiles(audioListFile, outputAudioFile)
+        outputAudioFile
+    }
+
+    private suspend fun synthesizeExactTimestampDubbedAudio(
+        segments: List<DialogueSegment>,
+        videoDuration: Double,
+        voiceProfile: VoiceProfile,
+        geminiApiKey: String,
+        workDir: File,
+        outputAudioFile: File,
+        onProgress: (Float, String) -> Unit
+    ): File = withContext(Dispatchers.IO) {
+        val segmentsDir = File(workDir, "exact_parts").apply { mkdirs() }
+        val audioListFile = File(segmentsDir, "concat_list.txt")
+        val listEntries = mutableListOf<String>()
+
+        var currentTimeline = 0.0
+        val totalSegments = segments.size
+
+        for (i in 0 until totalSegments) {
+            val seg = segments[i]
+            val targetDur = (seg.end - seg.start).coerceAtLeast(0.3)
+
+            // 1. Precise silence gap so audio starts at exact SRT start timestamp
+            val preGap = seg.start - currentTimeline
+            if (preGap > 0.02) {
+                val silenceFile = File(segmentsDir, "silence_${i}.wav")
+                ffmpegEngine.writeSilenceWav(silenceFile, preGap)
+                listEntries.add("file '${silenceFile.absolutePath}'")
+                currentTimeline += preGap
+            }
+
+            // 2. Synthesize speech for this exact SRT segment
+            val rawClip = File(segmentsDir, "raw_${i}.${if (voiceProfile.isGemini) "wav" else "mp3"}")
+            val exactWav = File(segmentsDir, "exact_${i}.wav")
+
+            val stepProgress = 0.68f + (i.toFloat() / totalSegments) * 0.14f
+            val timeRange = String.format(java.util.Locale.US, "%.1fs–%.1fs", seg.start, seg.end)
+            onProgress(stepProgress, "🎙️ Exact SRT dubbing ${i + 1}/$totalSegments at $timeRange (${String.format(java.util.Locale.US, "%.1fs", targetDur)})...")
+
+            if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                try {
+                    geminiTtsClient.synthesizeSpeech(geminiApiKey, seg.text, rawClip, voiceProfile)
+                } catch (_: Exception) {
+                    edgeTtsClient.synthesizeSpeech(
+                        text = seg.text,
+                        outputFile = rawClip,
+                        voiceName = "my-MM-ThihaNeural",
+                        rate = voiceProfile.rate.ifBlank { "+0%" },
+                        pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                    )
+                }
+            } else {
+                edgeTtsClient.synthesizeSpeech(
+                    text = seg.text,
+                    outputFile = rawClip,
+                    voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
+                    rate = voiceProfile.rate.ifBlank { "+0%" },
+                    pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                )
+            }
+
+            // 3. Time-warp and pad/trim so this audio segment matches targetDur of original video SRT 100% exactly
+            ffmpegEngine.fitSegmentExactDuration(rawClip, exactWav, targetDur)
+            val finalPartDur = ffmpegEngine.getMediaDurationSeconds(exactWav)
+
+            listEntries.add("file '${exactWav.absolutePath}'")
+            currentTimeline += finalPartDur
+        }
+
+        // 4. Fill tail silence to the end of the video
+        val postGap = videoDuration - currentTimeline
+        if (postGap > 0.05) {
+            val tailSilence = File(segmentsDir, "silence_tail.wav")
+            ffmpegEngine.writeSilenceWav(tailSilence, postGap)
+            listEntries.add("file '${tailSilence.absolutePath}'")
+            currentTimeline += postGap
+        }
+
+        // 5. Concatenate all audio and silence files into unified track
         audioListFile.writeText(listEntries.joinToString("\n") { it }, Charsets.UTF_8)
         ffmpegEngine.concatAudioFiles(audioListFile, outputAudioFile)
         outputAudioFile

@@ -80,7 +80,7 @@ class RecapPipelineService : Service() {
             speed: Float = 1.0f,
             blurEnabled: Boolean = false,
             blurX: Float = 0.78f, blurY: Float = 0.04f, blurW: Float = 0.18f, blurH: Float = 0.08f, blurStrength: Int = 16,
-            dubbingMode: String = "DIALOGUE_SYNC"
+            dubbingMode: String = "EXACT_SRT_SYNC"
         ) = Intent(context, RecapPipelineService::class.java).apply {
             this.action = ACTION_START
             putExtra(EXTRA_ACTION,           action)
@@ -155,7 +155,7 @@ class RecapPipelineService : Service() {
                 val blurW         = intent.getFloatExtra(EXTRA_BLUR_W, 0.18f)
                 val blurH         = intent.getFloatExtra(EXTRA_BLUR_H, 0.08f)
                 val blurStrength  = intent.getIntExtra(EXTRA_BLUR_STRENGTH, 16)
-                val dubbingMode   = intent.getStringExtra(EXTRA_DUBBING_MODE) ?: "DIALOGUE_SYNC"
+                val dubbingMode   = intent.getStringExtra(EXTRA_DUBBING_MODE) ?: "EXACT_SRT_SYNC"
 
                 if (pipelineAction != "COMPOSE" && url.isBlank()) {
                     stopForegroundAndSelf()

@@ -230,5 +230,5 @@ data class PipelineParams(
     val blurX: Float = 0.78f, val blurY: Float = 0.04f,
     val blurW: Float = 0.18f, val blurH: Float = 0.08f,
     val blurStrength: Int = 16,
-    val dubbingMode: String = "DIALOGUE_SYNC" // "DIALOGUE_SYNC" | "STORY_RECAP"
+    val dubbingMode: String = "EXACT_SRT_SYNC" // "EXACT_SRT_SYNC" | "DIALOGUE_SYNC" | "STORY_RECAP"
 )
