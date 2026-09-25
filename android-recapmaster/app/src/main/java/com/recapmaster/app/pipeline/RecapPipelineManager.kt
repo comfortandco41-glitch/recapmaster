@@ -53,6 +53,12 @@ data class PipelineState(
             stage != PipelineStage.FAILED
 }
 
+data class DialogueSegment(
+    val start: Double,
+    val end: Double,
+    val text: String
+)
+
 class RecapPipelineManager(private val context: Context) {
 
     private val _state = MutableStateFlow(PipelineState())
