@@ -292,6 +292,8 @@ class FFmpegEngine(private val context: Context) {
             else -> String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", speed * 2.0f)
         }
 
+        val effectiveDur = if (kotlin.math.abs(speed - 1.0f) > 0.015f) rawDur / speed else rawDur
+
         val filterStr = if (effectiveDur < targetDur) {
             val padStr = String.format(java.util.Locale.US, "apad=whole_dur=%.3f", targetDur)
             if (atempoStr.isNotBlank()) "$atempoStr,$padStr" else padStr
