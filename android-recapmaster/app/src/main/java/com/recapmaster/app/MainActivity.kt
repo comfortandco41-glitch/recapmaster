@@ -36,6 +36,9 @@ class MainActivity : ComponentActivity() {
         pipelineManager = (application as? RecapApplication)?.pipelineManager
             ?: RecapPipelineManager(applicationContext)
 
+        // Initialize user license & subscription manager
+        com.recapmaster.app.auth.UserSubscriptionManager.init(applicationContext)
+
         // Request runtime permissions required on Android 13/14
         requestRuntimePermissions()
 
@@ -60,6 +63,18 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startPipelineSafely(params: PipelineParams) {
+        val currentUser = com.recapmaster.app.auth.AuthManager.currentUser.value
+        if (currentUser == null) {
+            android.widget.Toast.makeText(this, "⚠️ Please sign in with your Google account first.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+
+        val sub = com.recapmaster.app.auth.UserSubscriptionManager.subscription.value
+        if (sub != null && sub.isExpired) {
+            android.widget.Toast.makeText(this, "❌ Access expired. Please contact admin to extend your account.", android.widget.Toast.LENGTH_LONG).show()
+            return
+        }
+
         val serviceIntent = RecapPipelineService.buildStartIntent(
             context          = this,
             action           = params.action,

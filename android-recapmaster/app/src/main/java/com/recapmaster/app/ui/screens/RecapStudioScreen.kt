@@ -6,6 +6,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.common.api.ApiException
 import com.recapmaster.app.auth.AuthManager
+import com.recapmaster.app.auth.UserSubscriptionManager
+import com.recapmaster.app.auth.UserSubscription
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -92,11 +96,17 @@ fun RecapStudioScreen(
     val context = LocalContext.current
     val pipelineState by pipelineManager.state.collectAsState()
 
-    // ── Authentication State (Firebase & Google) ──────────────────────────────
+    // ── Authentication & Subscription State ─────────────────────────────────
     val currentUser by AuthManager.currentUser.collectAsState()
+    val subscription by UserSubscriptionManager.subscription.collectAsState()
+    val isSubLoading by UserSubscriptionManager.isLoading.collectAsState()
+    val clipboardManager = LocalClipboardManager.current
     var isSigningIn by remember { mutableStateOf(false) }
     var authMessage by remember { mutableStateOf<String?>(null) }
     var profileMenuExpanded by remember { mutableStateOf(false) }
+
+    val isUserLoggedIn = currentUser != null
+    val isExpired = isUserLoggedIn && subscription != null && subscription!!.isExpired
 
     val webClientId = remember(context) { AuthManager.getWebClientId(context) }
     val googleSignInLauncher = rememberLauncherForActivityResult(
@@ -275,7 +285,7 @@ fun RecapStudioScreen(
                             IconButton(onClick = { profileMenuExpanded = true }) {
                                 Surface(
                                     shape = RoundedCornerShape(20.dp),
-                                    color = Purple,
+                                    color = if (isExpired) Red else if (subscription?.isAdmin == true) Amber else Purple,
                                     modifier = Modifier.size(32.dp)
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
@@ -298,10 +308,29 @@ fun RecapStudioScreen(
                                         Column {
                                             Text(user.displayName ?: "Google User", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
                                             Text(user.email ?: "", fontSize = 11.sp, color = TextMuted)
+                                            if (subscription != null) {
+                                                Spacer(modifier = Modifier.height(4.dp))
+                                                val statusText = if (subscription!!.isAdmin) "👑 Admin (Unlimited)"
+                                                    else if (subscription!!.isExpired) "⛔ Access Expired"
+                                                    else "⚡ Trial: ${subscription!!.remainingDays}d ${subscription!!.remainingHours}h left"
+                                                val statusColor = if (subscription!!.isExpired) Red else Green
+                                                Text(statusText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = statusColor)
+                                                Text("Exp: ${subscription!!.formattedExpiry}", fontSize = 9.sp, color = TextMuted)
+                                            }
                                         }
                                     },
                                     onClick = {},
                                     leadingIcon = { Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Cyan) }
+                                )
+                                HorizontalDivider(color = Border)
+                                DropdownMenuItem(
+                                    text = { Text("Copy My User ID (UID)", color = Cyan, fontSize = 12.sp) },
+                                    leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Cyan) },
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(user.uid))
+                                        authMessage = "📋 User ID copied: ${user.uid}\nSend this to Admin to extend your access."
+                                        profileMenuExpanded = false
+                                    }
                                 )
                                 HorizontalDivider(color = Border)
                                 DropdownMenuItem(
@@ -373,6 +402,176 @@ fun RecapStudioScreen(
                         Text(authMessage ?: "", fontSize = 11.sp, color = TextPrimary, modifier = Modifier.weight(1f))
                         IconButton(onClick = { authMessage = null }, modifier = Modifier.size(24.dp)) {
                             Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
+
+            // ── 1. User Not Logged In: Mandatory Login Gate ───────────────
+            if (!isUserLoggedIn) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = BgCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Purple.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = PurpleLight,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            "🔐 Sign In to Use RecapMaster",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = TextPrimary
+                        )
+                        Text(
+                            "RecapMaster ကို အသုံးပြုရန် Google အကောင့်ဖြင့် ဝင်ရောက်ပေးပါ။ အကောင့်အသစ်တိုင်းအတွက် ၇ ရက် အကန့်အသတ်မရှိ (7 Days Unlimited Trial) အလိုအလျောက် ရရှိပါမည်။",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                        Button(
+                            onClick = {
+                                if (webClientId.isNullOrBlank()) {
+                                    authMessage = "⚠️ Google Web Client ID not found. Please re-download google-services.json from Firebase Console after adding SHA-1."
+                                }
+                                val client = AuthManager.getGoogleSignInClient(context, webClientId)
+                                googleSignInLauncher.launch(client.signInIntent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                            shape = RoundedCornerShape(22.dp),
+                            modifier = Modifier.fillMaxWidth().height(46.dp)
+                        ) {
+                            if (isSigningIn) {
+                                CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Signing in...", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            } else {
+                                Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(20.dp), tint = Color(0xFF4285F4))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text("Sign In with Google (အကောင့်ဝင်မည်)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // ── 2. User Logged In But Expired: Expiration Notice ───────────
+            if (isExpired) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = BgCard,
+                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Red.copy(alpha = 0.7f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.TimerOff,
+                            contentDescription = null,
+                            tint = Red,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            "⏳ 7-Day Access Expired (၇ ရက် ကုန်ဆုံးသွားပါပြီ)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = Red
+                        )
+                        Text(
+                            "သင့်အကောင့်၏ ၇ ရက် အခမဲ့အသုံးပြုခွင့်သည် ${subscription!!.formattedExpiry} တွင် ကုန်ဆုံးသွားပါပြီ။ ဆက်လက်အသုံးပြုနိုင်ရန် Admin ထံသို့ သင့် User ID (UID) ပေးပို့၍ သက်တမ်းတိုးခိုင်းပေးပါ။",
+                            fontSize = 11.sp,
+                            color = TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+
+                        // UID Copy Box
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = BgDeep,
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Your User ID (UID):", fontSize = 9.sp, color = TextMuted)
+                                    Text(currentUser!!.uid, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Cyan)
+                                }
+                                Button(
+                                    onClick = {
+                                        clipboardManager.setText(AnnotatedString(currentUser!!.uid))
+                                        authMessage = "📋 User ID copied to clipboard! Send this to Admin to extend your access."
+                                    },
+                                    colors = ButtonDefaults.buttonColors(containerColor = Cyan.copy(alpha = 0.2f), contentColor = Cyan),
+                                    shape = RoundedCornerShape(8.dp),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                                    modifier = Modifier.height(30.dp)
+                                ) {
+                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy", modifier = Modifier.size(13.dp))
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text("Copy", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        }
+
+                        // Refresh Status Button
+                        OutlinedButton(
+                            onClick = {
+                                UserSubscriptionManager.refresh(currentUser)
+                                authMessage = "🔄 Checking updated access status from Firebase..."
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                            modifier = Modifier.fillMaxWidth().height(36.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("Refresh Status (သက်တမ်းတိုးပြီးပါက နှိပ်ပါ)", fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+
+            // ── 3. Active User: 7-Day Trial Status Banner ──────────────────
+            if (isUserLoggedIn && subscription != null && !isExpired) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Green.copy(alpha = 0.10f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Green.copy(alpha = 0.35f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            if (subscription!!.isAdmin) Icons.Default.Shield else Icons.Default.CheckCircle,
+                            contentDescription = null,
+                            tint = Green,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            val titleText = if (subscription!!.isAdmin) "👑 Admin Account: Unlimited Access"
+                                else "⚡ 7-Day Unlimited Trial: ${subscription!!.remainingDays}d ${subscription!!.remainingHours}h remaining"
+                            Text(titleText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
+                            Text("Active until: ${subscription!!.formattedExpiry}", fontSize = 9.sp, color = TextMuted)
                         }
                     }
                 }
@@ -651,8 +850,18 @@ fun RecapStudioScreen(
             }
 
             // ── Step 1: Start Dubbing Button ──────────────────────────────
+            val canStartDubbing = isUserLoggedIn && !isExpired && !isProcessing && urlInput.isNotBlank() && geminiKey.isNotBlank()
+
             Button(
                 onClick = {
+                    if (!isUserLoggedIn) {
+                        authMessage = "⚠️ Please sign in with your Google account first."
+                        return@Button
+                    }
+                    if (isExpired) {
+                        authMessage = "❌ Your 7-day access has expired. Please contact admin to extend your account."
+                        return@Button
+                    }
                     try {
                         onStartPipeline(
                             PipelineParams(
@@ -672,7 +881,7 @@ fun RecapStudioScreen(
                         t.printStackTrace()
                     }
                 },
-                enabled = !isProcessing && urlInput.isNotBlank() && geminiKey.isNotBlank(),
+                enabled = canStartDubbing,
                 modifier = Modifier.fillMaxWidth().height(54.dp),
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Purple, disabledContainerColor = Border)
@@ -681,6 +890,14 @@ fun RecapStudioScreen(
                     CircularProgressIndicator(color = Color.White, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                     Spacer(modifier = Modifier.width(10.dp))
                     Text("Dubbing & Transcribing Video...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                } else if (!isUserLoggedIn) {
+                    Icon(Icons.Default.Lock, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("🔐 Sign In Required to Dub Video (အကောင့်ဝင်ပါ)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                } else if (isExpired) {
+                    Icon(Icons.Default.TimerOff, contentDescription = null, tint = Red)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("⛔ 7-Day Trial Expired (သက်တမ်းတိုးရန် လိုအပ်သည်)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 } else {
                     Icon(Icons.Default.RecordVoiceOver, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -1068,8 +1285,18 @@ fun RecapStudioScreen(
                     HorizontalDivider(color = Border)
 
                     // ── GENERATE FINAL VIDEO BUTTON ──
+                    val canRenderFinal = isUserLoggedIn && !isExpired && !isComposing
+
                     Button(
                         onClick = {
+                            if (!isUserLoggedIn) {
+                                authMessage = "⚠️ Please sign in with your Google account first."
+                                return@Button
+                            }
+                            if (isExpired) {
+                                authMessage = "❌ Your 7-day access has expired. Please contact admin to extend your account."
+                                return@Button
+                            }
                             try {
                                 exoPlayer?.pause()
                                 onStartPipeline(
@@ -1088,7 +1315,7 @@ fun RecapStudioScreen(
                                 t.printStackTrace()
                             }
                         },
-                        enabled = !isComposing,
+                        enabled = canRenderFinal,
                         modifier = Modifier.fillMaxWidth().height(56.dp),
                         shape = RoundedCornerShape(14.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black, disabledContainerColor = Border)
@@ -1097,6 +1324,14 @@ fun RecapStudioScreen(
                             CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                             Spacer(modifier = Modifier.width(10.dp))
                             Text("Rendering Final Video (FFmpeg)...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                        } else if (!isUserLoggedIn) {
+                            Icon(Icons.Default.Lock, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("🔐 Sign In Required to Render (အကောင့်ဝင်ပါ)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        } else if (isExpired) {
+                            Icon(Icons.Default.TimerOff, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("⛔ Access Expired — Contact Admin (သက်တမ်းတိုးပါ)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                         } else {
                             Icon(Icons.Default.MovieCreation, contentDescription = null)
                             Spacer(modifier = Modifier.width(8.dp))

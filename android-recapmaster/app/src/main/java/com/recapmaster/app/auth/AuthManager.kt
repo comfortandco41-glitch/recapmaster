@@ -21,8 +21,10 @@ object AuthManager {
     init {
         try {
             _currentUser.value = auth.currentUser
+            UserSubscriptionManager.onUserChanged(auth.currentUser)
             auth.addAuthStateListener { firebaseAuth ->
                 _currentUser.value = firebaseAuth.currentUser
+                UserSubscriptionManager.onUserChanged(firebaseAuth.currentUser)
             }
         } catch (t: Throwable) {
             t.printStackTrace()
