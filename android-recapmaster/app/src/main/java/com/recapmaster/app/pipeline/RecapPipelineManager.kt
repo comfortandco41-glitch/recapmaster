@@ -144,7 +144,9 @@ class RecapPipelineManager(private val context: Context) {
             // Stage 1: Download
             log("📥 [1/5] Downloading video from URL...", PipelineStage.DOWNLOADING, progress = 0.05f, stageProgress = 0.15f)
             val downloadRes = downloader.downloadUrl(videoUrl, sourceVideo)
-            log("✅ Downloaded: ${downloadRes.title} (${downloadRes.durationSeconds.toInt()}s)", progress = 0.18f, stageProgress = 1.0f)
+            val probedDur = ffmpegEngine.getMediaDurationSeconds(downloadRes.localFile)
+            val videoDuration = if (probedDur > 0.5) probedDur else if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
+            log("✅ Downloaded: ${downloadRes.title} (${videoDuration.toInt()}s)", progress = 0.18f, stageProgress = 1.0f)
 
             // Stage 2: Audio Extraction
             log("🎙️ [2/5] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, progress = 0.22f, stageProgress = 0.15f)
@@ -163,7 +165,6 @@ class RecapPipelineManager(private val context: Context) {
             log("🌏 [4/5] Translating dialogue segments to Burmese via Gemini...", PipelineStage.TRANSLATING_SCRIPT, progress = 0.53f, stageProgress = 0.20f)
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
-            val videoDuration = if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
             log("✅ Translation complete", progress = 0.65f, stageProgress = 1.0f)
 
             val dialogueSegments = parseDialogueSegments(burmeseTranscript)
@@ -395,7 +396,18 @@ class RecapPipelineManager(private val context: Context) {
     private fun parseDialogueSegments(transcriptJson: String): List<DialogueSegment> {
         val result = mutableListOf<DialogueSegment>()
         try {
-            val root = org.json.JSONObject(transcriptJson)
+            var clean = transcriptJson.trim()
+            if (clean.contains("```json")) {
+                clean = clean.substringAfter("```json").substringBefore("```").trim()
+            } else if (clean.contains("```")) {
+                clean = clean.substringAfter("```").substringBefore("```").trim()
+            }
+            val startIdx = clean.indexOf('{')
+            val endIdx = clean.lastIndexOf('}')
+            if (startIdx >= 0 && endIdx > startIdx) {
+                clean = clean.substring(startIdx, endIdx + 1)
+            }
+            val root = org.json.JSONObject(clean)
             val segs = root.optJSONArray("segments") ?: return emptyList()
             for (i in 0 until segs.length()) {
                 val obj = segs.getJSONObject(i)

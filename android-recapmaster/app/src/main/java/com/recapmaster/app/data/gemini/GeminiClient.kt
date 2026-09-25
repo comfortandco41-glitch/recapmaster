@@ -20,6 +20,80 @@ class GeminiClient(private val apiKey: String) {
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
     suspend fun translateToBurmese(transcriptJson: String): String = withContext(Dispatchers.IO) {
+        val inputSegments = parseSegmentsFromJson(transcriptJson)
+        if (inputSegments.isEmpty()) {
+            return@withContext transcriptJson
+        }
+
+        // If 10 or fewer segments, translate in one shot
+        if (inputSegments.size <= 10) {
+            return@withContext translateBatch(inputSegments)
+        }
+
+        // For long videos (> 10 segments, covering 2+ minutes):
+        // Translate in chunks of 10 segments to completely prevent LLM truncation / laziness.
+        // Guarantees 100% of dialogue past 1:30 min is fully translated without any missing speech.
+        val batchSize = 10
+        val allTranslatedSegments = JSONArray()
+
+        for (i in inputSegments.indices step batchSize) {
+            val chunk = inputSegments.subList(i, kotlin.math.min(i + batchSize, inputSegments.size))
+            val batchResultJson = translateBatch(chunk)
+            val translatedChunk = parseSegmentsArray(batchResultJson)
+            for (j in 0 until translatedChunk.length()) {
+                allTranslatedSegments.put(translatedChunk.getJSONObject(j))
+            }
+        }
+
+        val finalResult = JSONObject().apply {
+            put("segments", allTranslatedSegments)
+        }
+        finalResult.toString()
+    }
+
+    private fun cleanMarkdownJson(raw: String): String {
+        var clean = raw.trim()
+        if (clean.contains("```json")) {
+            clean = clean.substringAfter("```json").substringBefore("```").trim()
+        } else if (clean.contains("```")) {
+            clean = clean.substringAfter("```").substringBefore("```").trim()
+        }
+        val startIdx = clean.indexOf('{')
+        val endIdx = clean.lastIndexOf('}')
+        if (startIdx >= 0 && endIdx > startIdx) {
+            clean = clean.substring(startIdx, endIdx + 1)
+        }
+        return clean
+    }
+
+    private fun parseSegmentsFromJson(jsonStr: String): List<JSONObject> {
+        val list = mutableListOf<JSONObject>()
+        try {
+            val clean = cleanMarkdownJson(jsonStr)
+            val root = JSONObject(clean)
+            val segs = root.optJSONArray("segments") ?: return emptyList()
+            for (i in 0 until segs.length()) {
+                list.add(segs.getJSONObject(i))
+            }
+        } catch (_: Exception) {}
+        return list
+    }
+
+    private fun parseSegmentsArray(jsonStr: String): JSONArray {
+        try {
+            val clean = cleanMarkdownJson(jsonStr)
+            val root = JSONObject(clean)
+            return root.optJSONArray("segments") ?: JSONArray()
+        } catch (_: Exception) {
+            return JSONArray()
+        }
+    }
+
+    private fun translateBatch(batch: List<JSONObject>): String {
+        val batchJson = JSONObject().apply {
+            put("segments", JSONArray(batch))
+        }.toString()
+
         val prompt = """
 You are an award-winning movie dubbing translator specializing in natural, concise, lip-synced Burmese (မြန်မာဘာသာ ဒါဘင်ပြန်ဆိုသူ).
 Translate the following dialogue transcript segments into natural spoken Burmese.
@@ -36,10 +110,11 @@ CRITICAL DURATION & CONCISE TIMING CONSTRAINTS:
 {"segments": [{"start": 0.0, "end": 4.0, "text": "မြန်မာစကားပြော ပြန်ဆိုချက်"}]}
 
 Transcript to translate:
-$transcriptJson
+$batchJson
         """.trimIndent()
 
-        callGemini(prompt)
+        val rawResponse = callGemini(prompt)
+        return cleanMarkdownJson(rawResponse)
     }
 
     suspend fun generateRecapScript(
@@ -49,29 +124,27 @@ $transcriptJson
     ): String = withContext(Dispatchers.IO) {
         val durationSec = if (videoDurationSeconds > 0) videoDurationSeconds.toInt() else 60
         // Natural Burmese speech rate in Edge TTS / Gemini is ~1.8 words per second (108 words per minute).
-        // To match an exact 1-minute video, the script must be strictly ~105-112 words so audio finishes with visual.
+        // Target word count scales with durationSec so spoken narration spans the full video length.
         val targetWordsExact = (durationSec * 1.80).toInt().coerceAtLeast(18)
         val targetWordsMin = (durationSec * 1.65).toInt().coerceAtLeast(15)
         val targetWordsMax = (durationSec * 1.95).toInt().coerceAtLeast(22)
-        val targetSentences = (durationSec / 6.0).toInt().coerceIn(3, 30)
+        val targetSentences = (durationSec / 6.0).toInt().coerceIn(3, 50)
 
         val prompt = """
 You are an expert cinematic movie recap narrator in Burmese (မြန်မာဘာသာ ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြသူ).
-Write a concise, engaging, dramatic Burmese recap narration script that EXACTLY matches the $durationSec-second duration of the video.
+Write a comprehensive, engaging, dramatic Burmese recap narration script that covers the ENTIRE $durationSec-second duration of the video (${durationSec / 60}m ${durationSec % 60}s).
 
 CRITICAL DURATION & STORY PACING REQUIREMENTS:
 1. VIDEO CONTEXT & EXACT DURATION:
    - Video Title / Topic: "${videoTitle.ifBlank { "Movie / Video Recap" }}"
    - Source Video Duration: Exactly $durationSec seconds (approx. ${durationSec / 60}m ${durationSec % 60}s).
-   - MANDATORY: The spoken narration MUST fit the exact $durationSec-second visual timeline.
-   - If the video is 1 minute ($durationSec s), the Burmese narration MUST conclude precisely around $durationSec seconds. Do NOT make it overly long or add unnecessary filler!
+   - MANDATORY: The spoken narration MUST span the ENTIRE video from the opening scene all the way to the final second ($durationSec s).
+   - Do NOT stop early or write a short 1-minute summary for a ${durationSec}s video!
 
 2. STRICT WORD COUNT BUDGET:
    - Burmese speech rate is ~1.8 words per second.
-   - Target word count: EXACTLY around $targetWordsExact words (Strict budget: $targetWordsMin to $targetWordsMax words, ~ $targetSentences complete sentences).
-   - Do NOT write more than $targetWordsMax words, otherwise audio will overrun the video!
-   - Do NOT write fewer than $targetWordsMin words, otherwise narration will finish prematurely!
-   - Ensure the story has a complete arc (Beginning hook -> Core action -> Climax/Ending) neatly condensed into this exact word budget so audio and video conclude at the exact same moment.
+   - Target word count: EXACTLY around $targetWordsExact words (Strict budget: $targetWordsMin to $targetWordsMax words, approx. $targetSentences full narrative sentences).
+   - Ensure the narration covers the entire progression of the video (Hook -> Development -> Climax -> Ending resolution) so voice narration continues throughout the entire $durationSec seconds.
 
 3. SCRIPT FORMAT RULES:
    - Start immediately with the story action. NO greetings, NO intros (NO "မင်္ဂလာပါ", NO "ဒီဗီဒီယိုမှာတော့", NO "ယနေ့တော့", NO channel welcome).

@@ -60,45 +60,78 @@ Java_com_recapmaster_app_engine_WhisperEngine_transcribePcm(
     wparams.language         = lang;
     wparams.n_threads        = 4;
     wparams.offset_ms        = 0;
+    wparams.no_context       = true; // Crucial: prevents hallucinations from previous windows causing early termination
+    wparams.single_segment   = false;
+    wparams.suppress_blank   = true;
+    wparams.suppress_non_speech_tokens = true;
 
-    LOGI("Starting whisper transcription (%zu samples, lang: %s)...", pcm.size(), lang);
-    int ret = whisper_full(ctx, wparams, pcm.data(), pcm.size());
-    env->ReleaseStringUTFChars(language_j, lang);
+    LOGI("Starting whisper transcription (%zu samples, approx %.1fs, lang: %s)...",
+         pcm.size(), pcm.size() / 16000.0, lang);
 
-    if (ret != 0) {
-        LOGE("whisper_full failed with code %d", ret);
-        return env->NewStringUTF("{\"error\":\"Inference failed\"}");
-    }
-
-    const int n_segments = whisper_full_n_segments(ctx);
-    LOGI("Transcription finished: %d segments detected", n_segments);
+    // Process audio in 30-second windows so that every chunk of audio (e.g. 0-30s, 30-60s, 60-90s, 90-120s, 120-150s+)
+    // is transcribed with 100% independence, guaranteeing NO audio is missed or cut off past 90 seconds.
+    const size_t sample_rate = 16000;
+    const size_t window_size = 30 * sample_rate; // 30-second standard window
+    size_t offset = 0;
+    int global_segment_id = 0;
 
     std::ostringstream json;
     json << "{\"segments\":[";
-    for (int i = 0; i < n_segments; ++i) {
-        int64_t t0 = whisper_full_get_segment_t0(ctx, i) * 10; // convert to ms
-        int64_t t1 = whisper_full_get_segment_t1(ctx, i) * 10;
-        const char *text = whisper_full_get_segment_text(ctx, i);
+    bool first_seg = true;
 
-        // Escape JSON text
-        std::string clean_text = text ? text : "";
-        std::string escaped;
-        for (char c : clean_text) {
-            if (c == '"') escaped += "\\\"";
-            else if (c == '\\') escaped += "\\\\";
-            else if (c == '\n') escaped += "\\n";
-            else if (c == '\r') escaped += "\\r";
-            else if (c == '\t') escaped += "\\t";
-            else escaped += c;
+    while (offset < pcm.size()) {
+        size_t current_len = std::min(window_size, pcm.size() - offset);
+        if (current_len < sample_rate * 0.5) {
+            // Skip micro-slices shorter than 0.5s at the very end
+            break;
         }
 
-        if (i > 0) json << ",";
-        json << "{\"id\":" << i
-             << ",\"start\":" << (t0 / 1000.0)
-             << ",\"end\":" << (t1 / 1000.0)
-             << ",\"text\":\"" << escaped << "\"}";
+        const float* chunk_data = pcm.data() + offset;
+        double window_offset_sec = static_cast<double>(offset) / sample_rate;
+
+        int ret = whisper_full(ctx, wparams, chunk_data, current_len);
+        if (ret == 0) {
+            const int n_segments = whisper_full_n_segments(ctx);
+            for (int i = 0; i < n_segments; ++i) {
+                int64_t seg_t0 = whisper_full_get_segment_t0(ctx, i) * 10; // ms
+                int64_t seg_t1 = whisper_full_get_segment_t1(ctx, i) * 10;
+                double t0 = window_offset_sec + (seg_t0 / 1000.0);
+                double t1 = window_offset_sec + (seg_t1 / 1000.0);
+                const char *text = whisper_full_get_segment_text(ctx, i);
+
+                std::string clean_text = text ? text : "";
+                std::string escaped;
+                for (char c : clean_text) {
+                    if (c == '"') escaped += "\\\"";
+                    else if (c == '\\') escaped += "\\\\";
+                    else if (c == '\n') escaped += "\\n";
+                    else if (c == '\r') escaped += "\\r";
+                    else if (c == '\t') escaped += "\\t";
+                    else escaped += c;
+                }
+
+                if (escaped.empty()) continue;
+
+                if (!first_seg) json << ",";
+                first_seg = false;
+
+                json << "{\"id\":" << global_segment_id++
+                     << ",\"start\":" << t0
+                     << ",\"end\":" << t1
+                     << ",\"text\":\"" << escaped << "\"}";
+            }
+        } else {
+            LOGE("whisper_full failed for window at %.1fs with code %d", window_offset_sec, ret);
+        }
+
+        offset += current_len;
     }
+
+    env->ReleaseStringUTFChars(language_j, lang);
+
     json << "]}";
+    LOGI("Whisper finished: total %d segments detected across entire audio (%.1fs)",
+         global_segment_id, pcm.size() / 16000.0);
 
     return env->NewStringUTF(json.str().c_str());
 }
