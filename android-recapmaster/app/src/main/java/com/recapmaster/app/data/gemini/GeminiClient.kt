@@ -41,7 +41,10 @@ class GeminiClient(private val apiKey: String) {
             val batchResultJson = translateBatch(chunk)
             val translatedChunk = parseSegmentsArray(batchResultJson)
             for (j in 0 until translatedChunk.length()) {
-                allTranslatedSegments.put(translatedChunk.getJSONObject(j))
+                val obj = translatedChunk.optJSONObject(j)
+                if (obj != null) {
+                    allTranslatedSegments.put(obj)
+                }
             }
         }
 
@@ -73,7 +76,10 @@ class GeminiClient(private val apiKey: String) {
             val root = JSONObject(clean)
             val segs = root.optJSONArray("segments") ?: return emptyList()
             for (i in 0 until segs.length()) {
-                list.add(segs.getJSONObject(i))
+                val item = segs.optJSONObject(i)
+                if (item != null) {
+                    list.add(item)
+                }
             }
         } catch (_: Exception) {}
         return list
@@ -90,8 +96,12 @@ class GeminiClient(private val apiKey: String) {
     }
 
     private fun translateBatch(batch: List<JSONObject>): String {
+        val segmentsArr = JSONArray()
+        for (item in batch) {
+            segmentsArr.put(item)
+        }
         val batchJson = JSONObject().apply {
-            put("segments", JSONArray(batch))
+            put("segments", segmentsArr)
         }.toString()
 
         val prompt = """

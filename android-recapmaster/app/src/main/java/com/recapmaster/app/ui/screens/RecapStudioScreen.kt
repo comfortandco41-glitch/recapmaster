@@ -306,7 +306,7 @@ fun RecapStudioScreen(
                                 HorizontalDivider(color = Border)
                                 DropdownMenuItem(
                                     text = { Text("Sign Out", color = Red, fontSize = 12.sp) },
-                                    leadingIcon = { Icon(Icons.Default.Logout, contentDescription = null, tint = Red) },
+                                    leadingIcon = { Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Red) },
                                     onClick = {
                                         profileMenuExpanded = false
                                         AuthManager.signOut(context) {
