@@ -104,6 +104,7 @@ object UserSubscriptionManager {
                 val now = System.currentTimeMillis()
                 val sevenDaysMs = 7L * 24 * 60 * 60 * 1000L
                 val expiresAt = now + sevenDaysMs
+                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(expiresAt))
 
                 val initialData = hashMapOf(
                     "uid" to user.uid,
@@ -111,6 +112,9 @@ object UserSubscriptionManager {
                     "displayName" to (user.displayName ?: ""),
                     "createdAtMs" to now,
                     "expiresAtMs" to expiresAt,
+                    "expiresAt" to Timestamp(Date(expiresAt)), // Firebase Timestamp gives a Calendar Date Picker in Console!
+                    "expiryDate" to dateStr, // Human readable: "2026-10-02"
+                    "extendDays" to 0, // Admin can easily type 30 to add 30 days
                     "status" to "active",
                     "isUnlimited" to true,
                     "isAdmin" to false,
@@ -143,11 +147,38 @@ object UserSubscriptionManager {
                 val note = snapshot.getString("note") ?: ""
 
                 val createdAtMs = parseTimeToMs(snapshot.get("createdAtMs") ?: snapshot.get("createdAt"))
-                var expiresAtMs = parseTimeToMs(snapshot.get("expiresAtMs") ?: snapshot.get("expiresAt") ?: snapshot.get("extendedUntil"))
+                val extendDays = snapshot.getLong("extendDays") ?: 0L
+
+                // Check in order: expiresAt (Timestamp/Calendar) -> expiryDate (Text) -> expiresAtMs (Long)
+                var expiresAtMs = parseTimeToMs(
+                    snapshot.get("expiresAt")
+                        ?: snapshot.get("expiryDate")
+                        ?: snapshot.get("expiresAtMs")
+                        ?: snapshot.get("extendedUntil")
+                )
 
                 // Fallback if missing: 7 days from createdAt
                 if (expiresAtMs <= 0L && createdAtMs > 0L) {
                     expiresAtMs = createdAtMs + (7L * 24 * 60 * 60 * 1000L)
+                }
+
+                // If admin entered extendDays (e.g. 30), extend subscription by that many days
+                if (extendDays > 0) {
+                    val base = if (expiresAtMs > System.currentTimeMillis()) expiresAtMs else System.currentTimeMillis()
+                    expiresAtMs = base + (extendDays * 24 * 60 * 60 * 1000L)
+                }
+
+                // If document doesn't have the nice Timestamp yet, backfill it so console displays the calendar picker
+                if (snapshot.get("expiresAt") !is Timestamp && expiresAtMs > 0L) {
+                    try {
+                        val dStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(expiresAtMs))
+                        docRef.update(
+                            mapOf(
+                                "expiresAt" to Timestamp(Date(expiresAtMs)),
+                                "expiryDate" to dStr
+                            )
+                        )
+                    } catch (_: Exception) {}
                 }
 
                 val sub = UserSubscription(
@@ -174,15 +205,23 @@ object UserSubscriptionManager {
             is Timestamp -> raw.toDate().time
             is Date -> raw.time
             is String -> {
+                val clean = raw.trim()
                 try {
-                    raw.toLong()
+                    clean.toLong()
                 } catch (_: Exception) {
-                    try {
-                        val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-                        sdf.parse(raw)?.time ?: 0L
-                    } catch (_: Exception) {
-                        0L
+                    val formats = listOf("yyyy-MM-dd", "yyyy-MM-dd HH:mm", "yyyy/MM/dd", "dd-MM-yyyy")
+                    var parsed = 0L
+                    for (fmt in formats) {
+                        try {
+                            val sdf = SimpleDateFormat(fmt, Locale.US)
+                            val d = sdf.parse(clean)
+                            if (d != null) {
+                                parsed = d.time
+                                break
+                            }
+                        } catch (_: Exception) {}
                     }
+                    parsed
                 }
             }
             else -> 0L
