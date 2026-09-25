@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("com.chaquo.python")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -33,6 +34,15 @@ android {
         }
     }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
@@ -43,6 +53,7 @@ android {
         }
         debug {
             isDebuggable = true
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -120,6 +131,11 @@ dependencies {
     implementation("androidx.media3:media3-common:1.3.1")
     // Compose animation (AnimatedVisibility)
     implementation("androidx.compose.animation:animation:1.6.7")
+
+    // Firebase Authentication & Google Sign-In
+    implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation("com.google.firebase:firebase-auth-ktx")
+    implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

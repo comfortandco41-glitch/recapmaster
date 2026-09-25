@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "728125206973",
+    "project_id": "recapmaster-6d1c6",
+    "storage_bucket": "recapmaster-6d1c6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:728125206973:android:11c520225899dc622722d4",
+        "android_client_info": {
+          "package_name": "com.recapmaster.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyA5f0k8iE47bPKZBMXcGeuGBEqRc9bz60Q"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

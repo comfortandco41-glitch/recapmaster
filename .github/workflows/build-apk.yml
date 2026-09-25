@@ -24,6 +24,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Print Keystore SHA Fingerprints for Firebase
+        run: |
+          echo "### 🔑 Android Keystore Signatures (For Firebase Auth)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          keytool -list -v -keystore android-recapmaster/app/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep -E "SHA1|SHA256" >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
