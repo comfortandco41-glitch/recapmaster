@@ -248,61 +248,21 @@ class RecapPipelineManager(private val context: Context) {
                     log("✅ Edge TTS voice narration synthesized", progress = 0.78f, stageProgress = 1.0f)
                 }
 
-                // Check raw voice duration vs target video duration
-                var voiceToFit = rawVoice
+                // Dynamic Audio-Visual Pacing for Story Recap:
+                // - If narration finishes early: slow down tempo to stretch to exact video length
+                // - If narration is longer than video: speed up tempo to compress to exact video length
                 val rawAudDur = ffmpegEngine.getMediaDurationSeconds(rawVoice)
-                val tailGap = videoDuration - rawAudDur
-                if (videoDuration > 10.0 && tailGap > 8.0) {
-                    log("🎙️ Narration finished early (${String.format(java.util.Locale.US, "%.1fs", rawAudDur)}): generating cinematic story outro for final ${String.format(java.util.Locale.US, "%.1fs", tailGap)}...", progress = 0.80f)
-                    try {
-                        val outroScript = geminiClient.generateConcludingNarration(
-                            contextDialogue = scriptToDub.takeLast(300),
-                            gapDurationSeconds = tailGap - 0.5,
-                            videoTitle = downloadRes.title
-                        )
-                        if (outroScript.isNotBlank()) {
-                            val outroRaw = File(workDir, "outro_narration.${if (voiceProfile.isGemini) "wav" else "mp3"}")
-                            if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
-                                try {
-                                    geminiTtsClient.synthesizeSpeech(geminiApiKey, outroScript, outroRaw, voiceProfile)
-                                } catch (_: Exception) {
-                                    edgeTtsClient.synthesizeSpeech(
-                                        text = outroScript,
-                                        outputFile = outroRaw,
-                                        voiceName = "my-MM-ThihaNeural",
-                                        rate = voiceProfile.rate.ifBlank { "+0%" },
-                                        pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
-                                    )
-                                }
-                            } else {
-                                edgeTtsClient.synthesizeSpeech(
-                                    text = outroScript,
-                                    outputFile = outroRaw,
-                                    voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
-                                    rate = voiceProfile.rate.ifBlank { "+0%" },
-                                    pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
-                                )
-                            }
-                            if (outroRaw.exists() && outroRaw.length() > 0L) {
-                                val concatList = File(workDir, "recap_concat.txt")
-                                concatList.writeText("file '${rawVoice.absolutePath}'\nfile '${outroRaw.absolutePath}'", Charsets.UTF_8)
-                                val combinedVoice = File(workDir, "combined_narration.wav")
-                                ffmpegEngine.concatAudioFiles(concatList, combinedVoice)
-                                if (combinedVoice.exists() && combinedVoice.length() > 0L) {
-                                    voiceToFit = combinedVoice
-                                }
-                            }
-                        }
-                    } catch (e: Throwable) {
-                        log("ℹ️ Outro synthesis note: ${e.message}", progress = 0.81f)
+                if (videoDuration > 1.0 && rawAudDur > 1.0) {
+                    val tempoRatio = (rawAudDur / videoDuration).toFloat()
+                    val paceMsg = when {
+                        tempoRatio < 0.98f -> "Slowing down voice (${String.format(java.util.Locale.US, "%.2f", tempoRatio)}x) to stretch from ${String.format(java.util.Locale.US, "%.1fs", rawAudDur)} to exact video length ${String.format(java.util.Locale.US, "%.1fs", videoDuration)}"
+                        tempoRatio > 1.02f -> "Speeding up voice (${String.format(java.util.Locale.US, "%.2f", tempoRatio)}x) to fit ${String.format(java.util.Locale.US, "%.1fs", rawAudDur)} into exact video length ${String.format(java.util.Locale.US, "%.1fs", videoDuration)}"
+                        else -> "Narration matches video length perfectly (${String.format(java.util.Locale.US, "%.1fs", videoDuration)})"
                     }
-                }
-
-                // Strictly equalize audio track duration to match video duration 1:1
-                if (videoDuration > 1.0) {
-                    ffmpegEngine.fitSegmentExactDuration(voiceToFit, voiceAudio, targetDurationSeconds = videoDuration)
-                } else if (voiceToFit != voiceAudio) {
-                    voiceToFit.copyTo(voiceAudio, overwrite = true)
+                    log("⚡ Story Recap Pacing: $paceMsg...", progress = 0.81f)
+                    ffmpegEngine.fitSegmentExactDuration(rawVoice, voiceAudio, targetDurationSeconds = videoDuration)
+                } else if (rawVoice != voiceAudio) {
+                    rawVoice.copyTo(voiceAudio, overwrite = true)
                 }
                 log("✅ Audio and visual duration synchronized to exactly ${String.format(java.util.Locale.US, "%.1fs", videoDuration)}", progress = 0.83f)
             }

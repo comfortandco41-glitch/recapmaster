@@ -122,8 +122,14 @@ class FFmpegEngine(private val context: Context) {
         val audDur = getMediaDurationSeconds(dubbedVoiceAudio)
 
         val syncRatio = if (vidDur > 2.0 && audDur > 2.0) (audDur / vidDur).toFloat() else 1.0f
-        val atempoPrefix = if (syncRatio in 0.70f..1.35f && kotlin.math.abs(syncRatio - 1.0f) > 0.015f) {
-            String.format(java.util.Locale.US, "atempo=%.4f,", syncRatio)
+        val atempoPrefix = if (kotlin.math.abs(syncRatio - 1.0f) > 0.02f) {
+            val s = syncRatio.coerceIn(0.25f, 4.0f)
+            val atempo = when {
+                s in 0.5f..2.0f -> String.format(java.util.Locale.US, "atempo=%.4f", s)
+                s > 2.0f -> String.format(java.util.Locale.US, "atempo=2.0,atempo=%.4f", s / 2.0f)
+                else -> String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", s * 2.0f)
+            }
+            "$atempo,"
         } else {
             ""
         }
@@ -274,16 +280,16 @@ class FFmpegEngine(private val context: Context) {
         val targetDur = targetDurationSeconds.coerceAtLeast(0.25)
 
         val speed = if (rawDur > 0.1 && targetDur > 0.1) {
-            (rawDur / targetDur).toFloat().coerceIn(0.70f, 1.35f)
+            (rawDur / targetDur).toFloat().coerceIn(0.25f, 4.0f)
         } else {
             1.0f
         }
 
-        val effectiveDur = if (kotlin.math.abs(speed - 1.0f) > 0.015f) rawDur / speed else rawDur
-        val atempoStr = if (kotlin.math.abs(speed - 1.0f) > 0.015f) {
-            String.format(java.util.Locale.US, "atempo=%.4f", speed)
-        } else {
-            ""
+        val atempoStr = when {
+            kotlin.math.abs(speed - 1.0f) <= 0.015f -> ""
+            speed in 0.5f..2.0f -> String.format(java.util.Locale.US, "atempo=%.4f", speed)
+            speed > 2.0f -> String.format(java.util.Locale.US, "atempo=2.0,atempo=%.4f", speed / 2.0f)
+            else -> String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", speed * 2.0f)
         }
 
         val filterStr = if (effectiveDur < targetDur) {
@@ -413,7 +419,7 @@ class FFmpegEngine(private val context: Context) {
 
         val tempoAdjust = if (targetVideoDur > 2.0 && audDur > 2.0) {
             val ratio = (audDur / targetVideoDur).toFloat()
-            if (ratio in 0.70f..1.35f && kotlin.math.abs(ratio - 1.0f) > 0.015f) ratio else 1.0f
+            if (ratio in 0.25f..4.0f && kotlin.math.abs(ratio - 1.0f) > 0.015f) ratio else 1.0f
         } else 1.0f
 
         val effectiveAudioSpeed = speed * tempoAdjust
