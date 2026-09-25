@@ -82,7 +82,8 @@ class MainActivity : ComponentActivity() {
             blurY            = params.blurY,
             blurW            = params.blurW,
             blurH            = params.blurH,
-            blurStrength     = params.blurStrength
+            blurStrength     = params.blurStrength,
+            dubbingMode      = params.dubbingMode
         )
 
         try {
@@ -108,7 +109,8 @@ class MainActivity : ComponentActivity() {
                             pipelineManager.startDubbingPipeline(
                                 videoUrl     = params.url,
                                 geminiApiKey = params.geminiKey,
-                                voiceProfile = resolvedProfile
+                                voiceProfile = resolvedProfile,
+                                dubbingMode  = params.dubbingMode
                             )
                         }
                         "COMPOSE" -> {
@@ -227,5 +229,6 @@ data class PipelineParams(
     val blurEnabled: Boolean = false,
     val blurX: Float = 0.78f, val blurY: Float = 0.04f,
     val blurW: Float = 0.18f, val blurH: Float = 0.08f,
-    val blurStrength: Int = 16
+    val blurStrength: Int = 16,
+    val dubbingMode: String = "DIALOGUE_SYNC" // "DIALOGUE_SYNC" | "STORY_RECAP"
 )

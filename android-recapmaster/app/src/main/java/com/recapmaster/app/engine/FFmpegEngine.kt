@@ -8,6 +8,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileOutputStream
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -130,6 +133,92 @@ class FFmpegEngine(private val context: Context) {
             throw RuntimeException("Preview mux failed: output file is empty")
         }
         outputVideo
+    }
+
+    /**
+     * Generates a 24kHz 16-bit Mono PCM WAV file containing exact digital silence.
+     * Zero-overhead, zero-subprocess, 100% instantaneous Kotlin generation.
+     */
+    fun writeSilenceWav(outputFile: File, durationSeconds: Double, sampleRate: Int = 24000) {
+        val safeDuration = durationSeconds.coerceAtLeast(0.01)
+        val totalSamples = (safeDuration * sampleRate).toInt().coerceAtLeast(1)
+        val numChannels = 1
+        val bitsPerSample = 16
+        val dataSize = totalSamples * numChannels * (bitsPerSample / 8)
+        val byteRate = sampleRate * numChannels * (bitsPerSample / 8)
+        val blockAlign = numChannels * (bitsPerSample / 8)
+
+        outputFile.parentFile?.mkdirs()
+        FileOutputStream(outputFile).use { fos ->
+            val header = ByteBuffer.allocate(44).order(ByteOrder.LITTLE_ENDIAN).apply {
+                put("RIFF".toByteArray(Charsets.US_ASCII))
+                putInt(dataSize + 36)
+                put("WAVE".toByteArray(Charsets.US_ASCII))
+                put("fmt ".toByteArray(Charsets.US_ASCII))
+                putInt(16) // Subchunk1Size (16 for PCM)
+                putShort(1.toShort()) // AudioFormat (1 for PCM)
+                putShort(numChannels.toShort())
+                putInt(sampleRate)
+                putInt(byteRate)
+                putShort(blockAlign.toShort())
+                putShort(bitsPerSample.toShort())
+                put("data".toByteArray(Charsets.US_ASCII))
+                putInt(dataSize)
+            }
+            fos.write(header.array())
+            val zeroBuffer = ByteArray(4096)
+            var remaining = dataSize
+            while (remaining > 0) {
+                val toWrite = kotlin.math.min(remaining, zeroBuffer.size)
+                fos.write(zeroBuffer, 0, toWrite)
+                remaining -= toWrite
+            }
+        }
+    }
+
+    /**
+     * Resamples and optionally time-warps a dialogue segment audio to fit its scene duration.
+     * Uses FFmpeg atempo filter if speedFactor deviates from 1.0x.
+     */
+    suspend fun fitSegmentAudio(
+        inputAudio: File,
+        outputWav: File,
+        speedFactor: Float = 1.0f
+    ): File = withContext(Dispatchers.IO) {
+        outputWav.parentFile?.mkdirs()
+        val speed = speedFactor.coerceIn(0.5f, 2.0f)
+        val filter = if (kotlin.math.abs(speed - 1.0f) > 0.02f) {
+            String.format(java.util.Locale.US, "-filter:a \"atempo=%.4f\"", speed)
+        } else {
+            ""
+        }
+        val cmd = "-y -i \"${inputAudio.absolutePath}\" $filter -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
+        executeFfmpeg(cmd)
+        if (!outputWav.exists() || outputWav.length() == 0L) {
+            throw RuntimeException("Audio segment fit failed for ${inputAudio.name}")
+        }
+        outputWav
+    }
+
+    /**
+     * Concatenates an ordered list of audio and silence files into a single unified track.
+     */
+    suspend fun concatAudioFiles(
+        audioListFile: File,
+        outputAudio: File
+    ): File = withContext(Dispatchers.IO) {
+        outputAudio.parentFile?.mkdirs()
+        val codecArgs = when {
+            outputAudio.name.endsWith(".wav", ignoreCase = true) -> "-c:a pcm_s16le -ar 24000"
+            outputAudio.name.endsWith(".mp3", ignoreCase = true) -> "-c:a libmp3lame -b:a 192k -ar 24000"
+            else -> "-c:a aac -b:a 192k -ar 44100"
+        }
+        val cmd = "-y -f concat -safe 0 -i \"${audioListFile.absolutePath}\" $codecArgs \"${outputAudio.absolutePath}\""
+        executeFfmpeg(cmd)
+        if (!outputAudio.exists() || outputAudio.length() == 0L) {
+            throw RuntimeException("Audio concatenation failed: output file is empty")
+        }
+        outputAudio
     }
 
     /**

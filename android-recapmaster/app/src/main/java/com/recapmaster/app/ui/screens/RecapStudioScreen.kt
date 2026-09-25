@@ -110,6 +110,7 @@ fun RecapStudioScreen(
     var customPitchSlider by remember { mutableFloatStateOf(-2f) }
     var customPersonaPrompt by remember { mutableStateOf("") }
     var showFineTune    by remember { mutableStateOf(false) }
+    var dubbingMode     by remember { mutableStateOf("DIALOGUE_SYNC") } // "DIALOGUE_SYNC" | "STORY_RECAP"
 
     // In-app voice audition state
     var isAuditioning   by remember { mutableStateOf(false) }
@@ -477,6 +478,37 @@ fun RecapStudioScreen(
                     }
                 }
 
+                HorizontalDivider(color = Border)
+
+                Text("Dubbing Timing & Scene Alignment Mode", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    FilterChip(
+                        selected = dubbingMode == "DIALOGUE_SYNC",
+                        onClick = { dubbingMode = "DIALOGUE_SYNC" },
+                        label = { Text("🎯 Scene Dialogue Sync (အသံကိုက်)", fontSize = 11.sp, fontWeight = if (dubbingMode == "DIALOGUE_SYNC") FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Cyan, selectedLabelColor = Color.Black),
+                        modifier = Modifier.weight(1f)
+                    )
+                    FilterChip(
+                        selected = dubbingMode == "STORY_RECAP",
+                        onClick = { dubbingMode = "STORY_RECAP" },
+                        label = { Text("📖 Story Recap (ဇာတ်လမ်းပြော)", fontSize = 11.sp, fontWeight = if (dubbingMode == "STORY_RECAP") FontWeight.Bold else FontWeight.Normal) },
+                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Purple, selectedLabelColor = Color.White),
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                Text(
+                    text = if (dubbingMode == "DIALOGUE_SYNC")
+                        "⚡ Syncs Burmese speech directly to each actor's dialogue timestamps. Scene pauses are preserved."
+                    else
+                        "✨ Continuous narrator story recap explaining the movie from start to end.",
+                    fontSize = 10.sp,
+                    color = TextMuted
+                )
+
             }
 
             // ── Step 1: Start Dubbing Button ──────────────────────────────
@@ -493,7 +525,8 @@ fun RecapStudioScreen(
                                 voice          = selectedProfile.voiceId,
                                 voiceRate      = "${if (customRateSlider >= 0) "+" else ""}${customRateSlider.toInt()}%",
                                 voicePitch     = "${if (customPitchSlider >= 0) "+" else ""}${customPitchSlider.toInt()}Hz",
-                                voicePrompt    = customPersonaPrompt
+                                voicePrompt    = customPersonaPrompt,
+                                dubbingMode    = dubbingMode
                             )
                         )
                     } catch (t: Throwable) {

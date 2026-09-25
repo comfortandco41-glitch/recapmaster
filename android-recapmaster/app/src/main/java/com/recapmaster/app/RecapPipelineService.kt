@@ -59,6 +59,7 @@ class RecapPipelineService : Service() {
         const val EXTRA_BLUR_W          = "blur_w"
         const val EXTRA_BLUR_H          = "blur_h"
         const val EXTRA_BLUR_STRENGTH   = "blur_strength"
+        const val EXTRA_DUBBING_MODE    = "dubbing_mode"
 
         fun buildStartIntent(
             context: Context,
@@ -78,7 +79,8 @@ class RecapPipelineService : Service() {
             marginV: Int = 30,
             speed: Float = 1.0f,
             blurEnabled: Boolean = false,
-            blurX: Float = 0.78f, blurY: Float = 0.04f, blurW: Float = 0.18f, blurH: Float = 0.08f, blurStrength: Int = 16
+            blurX: Float = 0.78f, blurY: Float = 0.04f, blurW: Float = 0.18f, blurH: Float = 0.08f, blurStrength: Int = 16,
+            dubbingMode: String = "DIALOGUE_SYNC"
         ) = Intent(context, RecapPipelineService::class.java).apply {
             this.action = ACTION_START
             putExtra(EXTRA_ACTION,           action)
@@ -102,6 +104,7 @@ class RecapPipelineService : Service() {
             putExtra(EXTRA_BLUR_W,           blurW)
             putExtra(EXTRA_BLUR_H,           blurH)
             putExtra(EXTRA_BLUR_STRENGTH,    blurStrength)
+            putExtra(EXTRA_DUBBING_MODE,     dubbingMode)
         }
     }
 
@@ -152,6 +155,7 @@ class RecapPipelineService : Service() {
                 val blurW         = intent.getFloatExtra(EXTRA_BLUR_W, 0.18f)
                 val blurH         = intent.getFloatExtra(EXTRA_BLUR_H, 0.08f)
                 val blurStrength  = intent.getIntExtra(EXTRA_BLUR_STRENGTH, 16)
+                val dubbingMode   = intent.getStringExtra(EXTRA_DUBBING_MODE) ?: "DIALOGUE_SYNC"
 
                 if (pipelineAction != "COMPOSE" && url.isBlank()) {
                     stopForegroundAndSelf()
@@ -192,7 +196,8 @@ class RecapPipelineService : Service() {
                                 pipelineManager.startDubbingPipeline(
                                     videoUrl     = url,
                                     geminiApiKey = geminiKey,
-                                    voiceProfile = activeProfile
+                                    voiceProfile = activeProfile,
+                                    dubbingMode  = dubbingMode
                                 )
                             }
                             "COMPOSE" -> {
@@ -216,6 +221,7 @@ class RecapPipelineService : Service() {
                                     videoUrl          = url,
                                     geminiApiKey      = geminiKey,
                                     voiceProfile      = activeProfile,
+                                    dubbingMode       = dubbingMode,
                                     soundStyle        = soundStyle,
                                     burnSubtitles     = burnSubs,
                                     subtitlePlacement = subPlacement,

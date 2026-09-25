@@ -21,9 +21,16 @@ class GeminiClient(private val apiKey: String) {
 
     suspend fun translateToBurmese(transcriptJson: String): String = withContext(Dispatchers.IO) {
         val prompt = """
-You are a professional movie subtitle translator specializing in natural, fluent Burmese (မြန်မာဘာသာ).
-Translate the following dialogue transcript segments into fluent, idiomatic Burmese subtitles.
-Preserve exact timestamps and formatting. Output ONLY the translated JSON format:
+You are a professional movie subtitle & dubbing translator specializing in natural, fluent, lip-synced Burmese (မြန်မာဘာသာ ဒါဘင်ပြန်ဆိုသူ).
+Translate the following dialogue transcript segments into fluent, idiomatic Burmese.
+
+CRITICAL DURATION & TIMING CONSTRAINTS:
+1. Preserve EXACT timestamps ("start" and "end" in seconds) and segment array structure.
+2. In movie dubbing, the spoken Burmese duration must fit within the scene window (duration = end - start seconds).
+3. Burmese speech averages ~2.5 words (approx 4-6 syllables) per second.
+   - For short scenes (1-3s): Keep the Burmese concise, punchy, and direct. Avoid verbose formal prefixes or filler words.
+   - For longer scenes (4-8s): Match the natural conversational flow.
+4. Output ONLY valid JSON in this exact structure without markdown or backticks:
 {"segments": [{"start": 0.0, "end": 4.0, "text": "မြန်မာဘာသာပြန်စာတန်း"}]}
 
 Transcript to translate:

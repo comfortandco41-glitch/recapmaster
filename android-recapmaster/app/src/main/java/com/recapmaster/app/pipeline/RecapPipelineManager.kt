@@ -114,7 +114,8 @@ class RecapPipelineManager(private val context: Context) {
     suspend fun startDubbingPipeline(
         videoUrl: String,
         geminiApiKey: String,
-        voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile()
+        voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile(),
+        dubbingMode: String = "DIALOGUE_SYNC" // "DIALOGUE_SYNC" | "STORY_RECAP"
     ) = withContext(Dispatchers.IO) {
         logBuffer.clear()
         _state.value = PipelineState()
@@ -144,59 +145,75 @@ class RecapPipelineManager(private val context: Context) {
             whisperEngine.release()
             log("✅ Transcription complete", progress = 0.50f)
 
-            // Stage 4: Gemini Burmese Translation & Recap Script
-            log("🌏 [4/5] Translating & generating Burmese recap narration via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
+            // Stage 4: Gemini Burmese Translation & Timing Parsing
+            log("🌏 [4/5] Translating dialogue segments to Burmese via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
             val videoDuration = if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
-            val narrationScript = geminiClient.generateRecapScript(
-                burmeseTranscript = burmeseTranscript,
-                videoDurationSeconds = videoDuration,
-                videoTitle = downloadRes.title
-            )
 
-            val dialogueText = extractAllDialogueTexts(burmeseTranscript)
-            val scriptToDub = if (narrationScript.isNotBlank() && narrationScript.length >= 40) {
-                narrationScript
-            } else if (dialogueText.isNotBlank()) {
-                dialogueText
+            val dialogueSegments = parseDialogueSegments(burmeseTranscript)
+            val mergedSegments = mergeCloseDialogueSegments(dialogueSegments)
+
+            // Stage 5: Voice Dubbing (Scene Dialogue Sync vs Story Recap Narration)
+            if (dubbingMode == "DIALOGUE_SYNC" && mergedSegments.isNotEmpty()) {
+                log("🔊 [5/5] Synthesizing scene-aligned dialogue (${mergedSegments.size} scenes) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                synthesizeDialogueDubbedAudio(
+                    segments = mergedSegments,
+                    videoDuration = videoDuration,
+                    voiceProfile = voiceProfile,
+                    geminiApiKey = geminiApiKey,
+                    workDir = workDir,
+                    outputAudioFile = voiceAudio,
+                    onProgress = { p, msg -> log(msg, progress = p) }
+                )
+                log("✅ Scene dialogue dubbed and synchronized perfectly with video cuts", progress = 0.82f)
             } else {
-                narrationScript
-            }
+                // Continuous Story Recap Narration mode (or fallback when 0 speech segments detected)
+                val narrationScript = geminiClient.generateRecapScript(
+                    burmeseTranscript = burmeseTranscript,
+                    videoDurationSeconds = videoDuration,
+                    videoTitle = downloadRes.title
+                )
+                val dialogueText = extractAllDialogueTexts(burmeseTranscript)
+                val scriptToDub = if (narrationScript.isNotBlank() && narrationScript.length >= 40) {
+                    narrationScript
+                } else if (dialogueText.isNotBlank()) {
+                    dialogueText
+                } else {
+                    narrationScript
+                }
 
-            log("✅ Full Burmese recap script prepared (${scriptToDub.split(" ", "။").filter { it.isNotBlank() }.size} words for ${videoDuration.toInt()}s video)", progress = 0.65f)
-
-            // Stage 5: Voice Dubbing (Gemini AI Voice or Edge TTS)
-            log("🔊 [5/5] Synthesizing Burmese voice (${voiceProfile.name}) via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
-            if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
-                try {
-                    geminiTtsClient.synthesizeSpeech(
-                        apiKey = geminiApiKey,
-                        text = scriptToDub,
-                        outputFile = voiceAudio,
-                        profile = voiceProfile
-                    )
-                    log("✅ Gemini AI voice narration synthesized successfully", progress = 0.78f)
-                } catch (e: Exception) {
-                    log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f)
+                log("🔊 [5/5] Synthesizing continuous recap narration via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                    try {
+                        geminiTtsClient.synthesizeSpeech(
+                            apiKey = geminiApiKey,
+                            text = scriptToDub,
+                            outputFile = voiceAudio,
+                            profile = voiceProfile
+                        )
+                        log("✅ Gemini AI voice narration synthesized successfully", progress = 0.78f)
+                    } catch (e: Exception) {
+                        log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f)
+                        edgeTtsClient.synthesizeSpeech(
+                            text = scriptToDub,
+                            outputFile = voiceAudio,
+                            voiceName = "my-MM-ThihaNeural",
+                            rate = voiceProfile.rate.ifBlank { "+10%" },
+                            pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                        )
+                        log("✅ Fallback voice narration synthesized via Edge TTS", progress = 0.78f)
+                    }
+                } else {
                     edgeTtsClient.synthesizeSpeech(
                         text = scriptToDub,
                         outputFile = voiceAudio,
-                        voiceName = "my-MM-ThihaNeural",
+                        voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
                         rate = voiceProfile.rate.ifBlank { "+10%" },
                         pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
                     )
-                    log("✅ Fallback voice narration synthesized via Edge TTS", progress = 0.78f)
+                    log("✅ Edge TTS voice narration synthesized", progress = 0.78f)
                 }
-            } else {
-                edgeTtsClient.synthesizeSpeech(
-                    text = scriptToDub,
-                    outputFile = voiceAudio,
-                    voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
-                    rate = voiceProfile.rate.ifBlank { "+10%" },
-                    pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
-                )
-                log("✅ Edge TTS voice narration synthesized", progress = 0.78f)
             }
 
             // Prepare instant synced preview video (fast stream copy)
@@ -337,6 +354,7 @@ class RecapPipelineManager(private val context: Context) {
         videoUrl: String,
         geminiApiKey: String,
         voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile(),
+        dubbingMode: String = "DIALOGUE_SYNC",
         soundStyle: String = "cinematic_recap",
         burnSubtitles: Boolean = true,
         subtitlePlacement: String = "bottom",
@@ -345,7 +363,7 @@ class RecapPipelineManager(private val context: Context) {
         playbackSpeed: Float = 1.0f,
         blurBox: BlurBoxConfig = BlurBoxConfig()
     ) = withContext(Dispatchers.IO) {
-        startDubbingPipeline(videoUrl, geminiApiKey, voiceProfile)
+        startDubbingPipeline(videoUrl, geminiApiKey, voiceProfile, dubbingMode)
         if (_state.value.stage == PipelineStage.DUBBED_READY) {
             generateFinalVideo(
                 soundStyle = soundStyle,
@@ -357,6 +375,142 @@ class RecapPipelineManager(private val context: Context) {
                 blurBox = blurBox
             )
         }
+    }
+
+    private fun parseDialogueSegments(transcriptJson: String): List<DialogueSegment> {
+        val result = mutableListOf<DialogueSegment>()
+        try {
+            val root = org.json.JSONObject(transcriptJson)
+            val segs = root.optJSONArray("segments") ?: return emptyList()
+            for (i in 0 until segs.length()) {
+                val obj = segs.getJSONObject(i)
+                val start = obj.optDouble("start", -1.0)
+                val end = obj.optDouble("end", -1.0)
+                val text = obj.optString("text", "").trim()
+                if (start >= 0.0 && end > start && text.isNotBlank()) {
+                    result.add(DialogueSegment(start, end, text))
+                }
+            }
+        } catch (_: Throwable) {}
+        return result
+    }
+
+    private fun mergeCloseDialogueSegments(segments: List<DialogueSegment>, minGapSeconds: Double = 0.6): List<DialogueSegment> {
+        if (segments.isEmpty()) return emptyList()
+        val merged = mutableListOf<DialogueSegment>()
+        var current = segments[0]
+
+        for (i in 1 until segments.size) {
+            val next = segments[i]
+            val gap = next.start - current.end
+            // If gap between sentences is small and combined length isn't too large, merge into one natural sentence
+            if (gap in 0.0..minGapSeconds && (current.text.length + next.text.length) < 80) {
+                current = DialogueSegment(
+                    start = current.start,
+                    end = next.end,
+                    text = "${current.text} ${next.text}".trim()
+                )
+            } else {
+                merged.add(current)
+                current = next
+            }
+        }
+        merged.add(current)
+        return merged
+    }
+
+    private suspend fun synthesizeDialogueDubbedAudio(
+        segments: List<DialogueSegment>,
+        videoDuration: Double,
+        voiceProfile: VoiceProfile,
+        geminiApiKey: String,
+        workDir: File,
+        outputAudioFile: File,
+        onProgress: (Float, String) -> Unit
+    ): File = withContext(Dispatchers.IO) {
+        val segmentsDir = File(workDir, "dialogue_parts").apply { mkdirs() }
+        val audioListFile = File(segmentsDir, "concat_list.txt")
+        val listEntries = mutableListOf<String>()
+
+        var currentTimeline = 0.0
+        val totalSegments = segments.size
+
+        for (i in 0 until totalSegments) {
+            val seg = segments[i]
+            val nextStart = if (i + 1 < totalSegments) segments[i + 1].start else videoDuration
+            val targetSceneWindow = (seg.end - seg.start).coerceAtLeast(0.5)
+            // Available time before next dialogue starts (ensures no overlapping between characters)
+            val maxAvailableWindow = kotlin.math.max(targetSceneWindow, (nextStart - seg.start).coerceAtLeast(targetSceneWindow))
+
+            // 1. If there is a silence gap before this segment, write exact silence WAV
+            val preGap = seg.start - currentTimeline
+            if (preGap > 0.04) {
+                val silenceFile = File(segmentsDir, "silence_${i}.wav")
+                ffmpegEngine.writeSilenceWav(silenceFile, preGap)
+                listEntries.add("file '${silenceFile.absolutePath}'")
+                currentTimeline += preGap
+            }
+
+            // 2. Synthesize segment speech
+            val rawClip = File(segmentsDir, "raw_${i}.${if (voiceProfile.isGemini) "wav" else "mp3"}")
+            val fittedWav = File(segmentsDir, "fitted_${i}.wav")
+
+            val stepProgress = 0.68f + (i.toFloat() / totalSegments) * 0.14f
+            val sceneTimestamp = String.format(java.util.Locale.US, "%.1fs", seg.start)
+            onProgress(stepProgress, "🎙️ Dubbing dialogue scene ${i + 1}/$totalSegments at $sceneTimestamp...")
+
+            if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                try {
+                    geminiTtsClient.synthesizeSpeech(geminiApiKey, seg.text, rawClip, voiceProfile)
+                } catch (_: Exception) {
+                    edgeTtsClient.synthesizeSpeech(
+                        text = seg.text,
+                        outputFile = rawClip,
+                        voiceName = "my-MM-ThihaNeural",
+                        rate = voiceProfile.rate.ifBlank { "+10%" },
+                        pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                    )
+                }
+            } else {
+                edgeTtsClient.synthesizeSpeech(
+                    text = seg.text,
+                    outputFile = rawClip,
+                    voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
+                    rate = voiceProfile.rate.ifBlank { "+10%" },
+                    pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                )
+            }
+
+            // 3. Measure duration and apply dynamic tempo fitting if Burmese speech exceeds scene window
+            val rawDur = ffmpegEngine.getMediaDurationSeconds(rawClip)
+            val speedFactor = if (rawDur > maxAvailableWindow && maxAvailableWindow > 0.5) {
+                (rawDur / maxAvailableWindow).toFloat().coerceIn(1.0f, 1.40f)
+            } else if (rawDur > targetSceneWindow * 1.25 && targetSceneWindow > 0.5) {
+                (rawDur / (targetSceneWindow * 1.15)).toFloat().coerceIn(1.0f, 1.30f)
+            } else {
+                1.0f
+            }
+
+            ffmpegEngine.fitSegmentAudio(rawClip, fittedWav, speedFactor)
+            val finalPartDur = ffmpegEngine.getMediaDurationSeconds(fittedWav)
+
+            listEntries.add("file '${fittedWav.absolutePath}'")
+            currentTimeline += finalPartDur
+        }
+
+        // 4. Fill remaining silence to the end of the video
+        val postGap = videoDuration - currentTimeline
+        if (postGap > 0.05) {
+            val tailSilence = File(segmentsDir, "silence_tail.wav")
+            ffmpegEngine.writeSilenceWav(tailSilence, postGap)
+            listEntries.add("file '${tailSilence.absolutePath}'")
+            currentTimeline += postGap
+        }
+
+        // 5. Concatenate all audio and silence files into a single unified synchronized audio track
+        audioListFile.writeText(listEntries.joinToString("\n") { it }, Charsets.UTF_8)
+        ffmpegEngine.concatAudioFiles(audioListFile, outputAudioFile)
+        outputAudioFile
     }
 
     private fun extractFirstSubtitleSnippet(burmeseTranscript: String): String {
