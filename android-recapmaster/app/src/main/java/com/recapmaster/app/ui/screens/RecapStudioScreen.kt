@@ -554,19 +554,175 @@ fun RecapStudioScreen(
 
             // ── Processing Progress Banner ────────────────────────────────
             AnimatedVisibility(visible = isProcessing) {
-                ElevatedCard(shape = RoundedCornerShape(16.dp), colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF1E1B4B))) {
+                val currentStageIndex = when (pipelineState.stage) {
+                    PipelineStage.DOWNLOADING -> 1
+                    PipelineStage.EXTRACTING_AUDIO -> 2
+                    PipelineStage.TRANSCRIBING -> 3
+                    PipelineStage.TRANSLATING_SCRIPT -> 4
+                    PipelineStage.DUBBING_VOICE -> 5
+                    PipelineStage.DUBBED_READY -> 5
+                    PipelineStage.COMPOSING_VIDEO -> 6
+                    PipelineStage.COMPLETED -> 6
+                    else -> 0
+                }
+
+                val stagePct = (pipelineState.stageProgress * 100).toInt().coerceIn(0, 100)
+                val totalPct = (pipelineState.progress * 100).toInt().coerceIn(0, 100)
+
+                val stageName = when (pipelineState.stage) {
+                    PipelineStage.DOWNLOADING -> "Stage 1/5: Downloading Video"
+                    PipelineStage.EXTRACTING_AUDIO -> "Stage 2/5: Extracting Audio"
+                    PipelineStage.TRANSCRIBING -> "Stage 3/5: Transcribing (Whisper)"
+                    PipelineStage.TRANSLATING_SCRIPT -> "Stage 4/5: Translating (Gemini)"
+                    PipelineStage.DUBBING_VOICE -> "Stage 5/5: Dubbing Voiceover"
+                    PipelineStage.COMPOSING_VIDEO -> "Composing Final Video (FFmpeg)"
+                    else -> "Processing..."
+                }
+
+                ElevatedCard(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.elevatedCardColors(containerColor = Color(0xFF131127)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, PurpleDim.copy(alpha = 0.5f))
+                ) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Text("🎬 ${pipelineState.message}", color = PurpleLight, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        LinearProgressIndicator(
-                            progress = { pipelineState.progress },
-                            modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
-                            color = Purple,
-                            trackColor = PurpleDim.copy(alpha = 0.3f)
-                        )
+                        // Header with Stage Name & Percentage Badges
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Cyan
+                                )
+                                Text(stageName, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Cyan.copy(alpha = 0.15f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.4f))
+                                ) {
+                                    Text(
+                                        text = "Stage $stagePct%",
+                                        color = Cyan,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Purple.copy(alpha = 0.15f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Purple.copy(alpha = 0.4f))
+                                ) {
+                                    Text(
+                                        text = "Total $totalPct%",
+                                        color = PurpleLight,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        // Active Stage Progress Bar (Prominent)
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Active Stage Progress", fontSize = 10.sp, color = TextMuted)
+                                Text("$stagePct%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Cyan)
+                            }
+                            LinearProgressIndicator(
+                                progress = { pipelineState.stageProgress },
+                                modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
+                                color = Cyan,
+                                trackColor = Cyan.copy(alpha = 0.15f)
+                            )
+                        }
+
+                        // Total Progress Bar
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Total Overall Progress", fontSize = 10.sp, color = TextMuted)
+                                Text("$totalPct%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurpleLight)
+                            }
+                            LinearProgressIndicator(
+                                progress = { pipelineState.progress },
+                                modifier = Modifier.fillMaxWidth().height(5.dp).clip(RoundedCornerShape(2.5.dp)),
+                                color = Purple,
+                                trackColor = PurpleDim.copy(alpha = 0.25f)
+                            )
+                        }
+
+                        // Multi-Stage Stepper Pills
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            listOf(
+                                1 to "Download",
+                                2 to "Audio",
+                                3 to "Whisper",
+                                4 to "Gemini",
+                                5 to "Dubbing",
+                                6 to "Render"
+                            ).forEach { (idx, name) ->
+                                val isDone = currentStageIndex > idx || pipelineState.stage == PipelineStage.COMPLETED
+                                val isActive = currentStageIndex == idx
+                                val pillBg = when {
+                                    isDone -> Green.copy(alpha = 0.15f)
+                                    isActive -> Cyan.copy(alpha = 0.20f)
+                                    else -> BgCard
+                                }
+                                val pillColor = when {
+                                    isDone -> Green
+                                    isActive -> Cyan
+                                    else -> TextMuted
+                                }
+                                val pillBorder = when {
+                                    isDone -> Green.copy(alpha = 0.5f)
+                                    isActive -> Cyan
+                                    else -> Border
+                                }
+
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = pillBg,
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, pillBorder),
+                                    modifier = Modifier.padding(horizontal = 1.dp)
+                                ) {
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = if (isDone) "✓" else if (isActive) "$stagePct%" else "$idx",
+                                            fontSize = 9.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = pillColor
+                                        )
+                                        Text(name, fontSize = 8.sp, color = pillColor)
+                                    }
+                                }
+                            }
+                        }
+
+                        // Current log line & details
+                        Text(pipelineState.message, color = TextPrimary, fontSize = 11.sp)
+
                         if (pipelineState.logLines.size > 1) {
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                pipelineState.logLines.takeLast(5).forEach { line ->
-                                    Text(line, fontSize = 10.sp, color = TextMuted, fontFamily = FontFamily.Monospace)
+                                pipelineState.logLines.takeLast(3).forEach { line ->
+                                    Text(line, fontSize = 9.sp, color = TextMuted, fontFamily = FontFamily.Monospace)
                                 }
                             }
                         }

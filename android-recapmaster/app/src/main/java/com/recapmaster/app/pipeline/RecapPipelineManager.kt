@@ -40,10 +40,11 @@ enum class PipelineStage {
 data class PipelineState(
     val stage: PipelineStage = PipelineStage.IDLE,
     val progress: Float = 0.0f,
+    val stageProgress: Float = 0.0f,
     val message: String = "Ready",
     val finalVideoUri: Uri? = null,
     val dubbedPreviewUri: Uri? = null,
-    val previewSubtitleText: String = "မင်္ဂလာပါ... ဒီဇာတ်လမ်းကတော့ စိတ်လှုပ်ရှားဖွယ် ဇာတ်ကားကောင်းတစ်ခု ဖြစ်ပါတယ်။",
+    val previewSubtitleText: String = "",
     val error: String? = null,
     val logLines: List<String> = emptyList()
 ) {
@@ -79,11 +80,18 @@ class RecapPipelineManager(private val context: Context) {
     private var activeBurmeseTranscript: String? = null
     private var activePreviewVideo: File? = null
 
-    private fun log(msg: String, stage: PipelineStage? = null, progress: Float? = null) {
+    private fun log(
+        msg: String,
+        stage: PipelineStage? = null,
+        progress: Float? = null,
+        stageProgress: Float? = null
+    ) {
         logBuffer.add(msg)
+        val newStage = stage ?: _state.value.stage
         _state.value = _state.value.copy(
-            stage = stage ?: _state.value.stage,
+            stage = newStage,
             progress = progress ?: _state.value.progress,
+            stageProgress = stageProgress ?: _state.value.stageProgress,
             message = msg,
             logLines = logBuffer.toList()
         )
@@ -134,28 +142,29 @@ class RecapPipelineManager(private val context: Context) {
 
         try {
             // Stage 1: Download
-            log("📥 [1/5] Downloading video from URL...", PipelineStage.DOWNLOADING, 0.05f)
+            log("📥 [1/5] Downloading video from URL...", PipelineStage.DOWNLOADING, progress = 0.05f, stageProgress = 0.15f)
             val downloadRes = downloader.downloadUrl(videoUrl, sourceVideo)
-            log("✅ Downloaded: ${downloadRes.title} (${downloadRes.durationSeconds.toInt()}s)", progress = 0.18f)
+            log("✅ Downloaded: ${downloadRes.title} (${downloadRes.durationSeconds.toInt()}s)", progress = 0.18f, stageProgress = 1.0f)
 
             // Stage 2: Audio Extraction
-            log("🎙️ [2/5] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, 0.22f)
+            log("🎙️ [2/5] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, progress = 0.22f, stageProgress = 0.15f)
             ffmpegEngine.extractSpeechAudio(downloadRes.localFile, extractedAudio)
-            log("✅ Audio extracted (16kHz mono PCM)", progress = 0.32f)
+            log("✅ Audio extracted (16kHz mono PCM)", progress = 0.32f, stageProgress = 1.0f)
 
             // Stage 3: On-Device Whisper Transcription
-            log("🧠 [3/5] Transcribing dialogue on-device with Whisper...", PipelineStage.TRANSCRIBING, 0.35f)
+            log("🧠 [3/5] Transcribing dialogue on-device with Whisper...", PipelineStage.TRANSCRIBING, progress = 0.35f, stageProgress = 0.15f)
             val modelFile = ensureWhisperModel()
             whisperEngine.loadModel(modelFile)
             val transcriptJson = whisperEngine.transcribeWav(extractedAudio, language = "auto")
             whisperEngine.release()
-            log("✅ Transcription complete", progress = 0.50f)
+            log("✅ Transcription complete", progress = 0.50f, stageProgress = 1.0f)
 
             // Stage 4: Gemini Burmese Translation & Timing Parsing
-            log("🌏 [4/5] Translating dialogue segments to Burmese via Gemini...", PipelineStage.TRANSLATING_SCRIPT, 0.53f)
+            log("🌏 [4/5] Translating dialogue segments to Burmese via Gemini...", PipelineStage.TRANSLATING_SCRIPT, progress = 0.53f, stageProgress = 0.20f)
             val geminiClient = GeminiClient(geminiApiKey)
             val burmeseTranscript = geminiClient.translateToBurmese(transcriptJson)
             val videoDuration = if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
+            log("✅ Translation complete", progress = 0.65f, stageProgress = 1.0f)
 
             val dialogueSegments = parseDialogueSegments(burmeseTranscript)
             // Merge close micro-fragments (< 0.45s apart) for exact SRT sync to avoid split sentence chopping
@@ -166,7 +175,7 @@ class RecapPipelineManager(private val context: Context) {
             // Stage 5: Voice Dubbing (Exact SRT Sync vs Scene Flow vs Story Recap)
             if (dubbingMode == "EXACT_SRT_SYNC" && dialogueSegments.isNotEmpty()) {
                 val segmentsToDub = if (srtSegments.isNotEmpty()) srtSegments else dialogueSegments
-                log("🔊 [5/5] Synthesizing exact SRT timestamp dubbing (${segmentsToDub.size} segments) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                log("🔊 [5/5] Synthesizing exact SRT timestamp dubbing (${segmentsToDub.size} segments) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f, 0.05f)
                 synthesizeExactTimestampDubbedAudio(
                     segments = segmentsToDub,
                     videoDuration = videoDuration,
@@ -174,11 +183,11 @@ class RecapPipelineManager(private val context: Context) {
                     geminiApiKey = geminiApiKey,
                     workDir = workDir,
                     outputAudioFile = voiceAudio,
-                    onProgress = { p, msg -> log(msg, progress = p) }
+                    onProgress = { p, stageP, msg -> log(msg, progress = p, stageProgress = stageP) }
                 )
-                log("✅ Exact SRT timestamp dubbing generated with dynamic non-overlapping sync", progress = 0.82f)
+                log("✅ Exact SRT timestamp dubbing generated with dynamic non-overlapping sync", progress = 0.82f, stageProgress = 1.0f)
             } else if (dubbingMode == "DIALOGUE_SYNC" && mergedSegments.isNotEmpty()) {
-                log("🔊 [5/5] Synthesizing scene-aligned dialogue (${mergedSegments.size} scenes) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                log("🔊 [5/5] Synthesizing scene-aligned dialogue (${mergedSegments.size} scenes) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f, 0.05f)
                 synthesizeDialogueDubbedAudio(
                     segments = mergedSegments,
                     videoDuration = videoDuration,
@@ -186,9 +195,9 @@ class RecapPipelineManager(private val context: Context) {
                     geminiApiKey = geminiApiKey,
                     workDir = workDir,
                     outputAudioFile = voiceAudio,
-                    onProgress = { p, msg -> log(msg, progress = p) }
+                    onProgress = { p, stageP, msg -> log(msg, progress = p, stageProgress = stageP) }
                 )
-                log("✅ Scene dialogue dubbed and synchronized perfectly with video cuts", progress = 0.82f)
+                log("✅ Scene dialogue dubbed and synchronized perfectly with video cuts", progress = 0.82f, stageProgress = 1.0f)
             } else {
                 // Continuous Story Recap Narration mode (or fallback when 0 speech segments detected)
                 val narrationScript = geminiClient.generateRecapScript(
@@ -205,7 +214,7 @@ class RecapPipelineManager(private val context: Context) {
                     narrationScript
                 }
 
-                log("🔊 [5/5] Synthesizing continuous recap narration via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                log("🔊 [5/5] Synthesizing continuous recap narration via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f, 0.25f)
                 if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
                     try {
                         geminiTtsClient.synthesizeSpeech(
@@ -214,9 +223,9 @@ class RecapPipelineManager(private val context: Context) {
                             outputFile = voiceAudio,
                             profile = voiceProfile
                         )
-                        log("✅ Gemini AI voice narration synthesized successfully", progress = 0.78f)
+                        log("✅ Gemini AI voice narration synthesized successfully", progress = 0.78f, stageProgress = 1.0f)
                     } catch (e: Exception) {
-                        log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f)
+                        log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f, stageProgress = 0.50f)
                         edgeTtsClient.synthesizeSpeech(
                             text = scriptToDub,
                             outputFile = voiceAudio,
@@ -224,7 +233,7 @@ class RecapPipelineManager(private val context: Context) {
                             rate = voiceProfile.rate.ifBlank { "+10%" },
                             pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
                         )
-                        log("✅ Fallback voice narration synthesized via Edge TTS", progress = 0.78f)
+                        log("✅ Fallback voice narration synthesized via Edge TTS", progress = 0.78f, stageProgress = 1.0f)
                     }
                 } else {
                     edgeTtsClient.synthesizeSpeech(
@@ -234,7 +243,7 @@ class RecapPipelineManager(private val context: Context) {
                         rate = voiceProfile.rate.ifBlank { "+10%" },
                         pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
                     )
-                    log("✅ Edge TTS voice narration synthesized", progress = 0.78f)
+                    log("✅ Edge TTS voice narration synthesized", progress = 0.78f, stageProgress = 1.0f)
                 }
             }
 
@@ -253,10 +262,11 @@ class RecapPipelineManager(private val context: Context) {
             activeBurmeseTranscript = burmeseTranscript
             activePreviewVideo = if (previewVideo.exists() && previewVideo.length() > 0) previewVideo else downloadRes.localFile
 
-            log("✨ Video dubbed successfully! Ready for live watermark blur & speed tuning.", PipelineStage.DUBBED_READY, 0.90f)
+            log("✨ Video dubbed successfully! Ready for live watermark blur & speed tuning.", PipelineStage.DUBBED_READY, 0.90f, 1.0f)
             _state.value = _state.value.copy(
                 stage = PipelineStage.DUBBED_READY,
                 progress = 0.90f,
+                stageProgress = 1.0f,
                 dubbedPreviewUri = Uri.fromFile(activePreviewVideo),
                 previewSubtitleText = "",
                 message = "✨ Video dubbed! You can now adjust Watermark Blur & Playback Speed."
@@ -317,11 +327,12 @@ class RecapPipelineManager(private val context: Context) {
                     val overallProgress = 0.92f + (pct * 0.06f)
                     _state.value = _state.value.copy(
                         progress = overallProgress,
+                        stageProgress = pct,
                         message = "🎬 $msg"
                     )
                 }
             )
-            log("✅ Video composed successfully", progress = 0.98f)
+            log("✅ Video composed successfully", progress = 0.98f, stageProgress = 1.0f)
 
             // Save to Gallery MediaStore
             val savedUri = exportToGallery(finalVideo, "recap_${System.currentTimeMillis()}.mp4")
@@ -332,6 +343,7 @@ class RecapPipelineManager(private val context: Context) {
             _state.value = PipelineState(
                 stage = PipelineStage.COMPLETED,
                 progress = 1.0f,
+                stageProgress = 1.0f,
                 message = "✅ Recap video saved to Gallery!",
                 finalVideoUri = savedUri,
                 dubbedPreviewUri = savedUri,
@@ -429,7 +441,7 @@ class RecapPipelineManager(private val context: Context) {
         geminiApiKey: String,
         workDir: File,
         outputAudioFile: File,
-        onProgress: (Float, String) -> Unit
+        onProgress: (overallProgress: Float, stageProgress: Float, String) -> Unit
     ): File = withContext(Dispatchers.IO) {
         val segmentsDir = File(workDir, "dialogue_parts").apply { mkdirs() }
         val audioListFile = File(segmentsDir, "concat_list.txt")
@@ -465,9 +477,10 @@ class RecapPipelineManager(private val context: Context) {
             val rawClip = File(segmentsDir, "raw_${i}.${if (voiceProfile.isGemini) "wav" else "mp3"}")
             val fittedWav = File(segmentsDir, "fitted_${i}.wav")
 
-            val stepProgress = 0.68f + (i.toFloat() / totalSegments) * 0.14f
+            val stepStagePct = (i + 1).toFloat() / totalSegments
+            val stepOverallProg = 0.68f + (stepStagePct * 0.14f)
             val sceneTimestamp = String.format(java.util.Locale.US, "%.1fs", seg.start)
-            onProgress(stepProgress, "🎙️ Dubbing dialogue scene ${i + 1}/$totalSegments at $sceneTimestamp...")
+            onProgress(stepOverallProg, stepStagePct, "🎙️ Dubbing dialogue scene ${i + 1}/$totalSegments at $sceneTimestamp (${(stepStagePct * 100).toInt()}%)...")
 
             if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
                 try {
@@ -528,7 +541,7 @@ class RecapPipelineManager(private val context: Context) {
         geminiApiKey: String,
         workDir: File,
         outputAudioFile: File,
-        onProgress: (Float, String) -> Unit
+        onProgress: (overallProgress: Float, stageProgress: Float, String) -> Unit
     ): File = withContext(Dispatchers.IO) {
         val segmentsDir = File(workDir, "exact_parts").apply { mkdirs() }
         val audioListFile = File(segmentsDir, "concat_list.txt")
@@ -561,9 +574,10 @@ class RecapPipelineManager(private val context: Context) {
             val rawClip = File(segmentsDir, "raw_${i}.${if (voiceProfile.isGemini) "wav" else "mp3"}")
             val exactWav = File(segmentsDir, "exact_${i}.wav")
 
-            val stepProgress = 0.68f + (i.toFloat() / totalSegments) * 0.14f
+            val stepStagePct = (i + 1).toFloat() / totalSegments
+            val stepOverallProg = 0.68f + (stepStagePct * 0.14f)
             val timeRange = String.format(java.util.Locale.US, "%.1fs–%.1fs", seg.start, seg.end)
-            onProgress(stepProgress, "🎙️ Exact SRT dubbing ${i + 1}/$totalSegments at $timeRange (${String.format(java.util.Locale.US, "%.1fs", targetDur)})...")
+            onProgress(stepOverallProg, stepStagePct, "🎙️ Exact SRT dubbing ${i + 1}/$totalSegments at $timeRange (${(stepStagePct * 100).toInt()}%)...")
 
             if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
                 try {
