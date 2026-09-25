@@ -119,8 +119,17 @@ class FFmpegEngine(private val context: Context) {
     ): File = withContext(Dispatchers.IO) {
         outputVideo.parentFile?.mkdirs()
         val vidDur = getMediaDurationSeconds(sourceVideo)
+        val audDur = getMediaDurationSeconds(dubbedVoiceAudio)
+
+        val syncRatio = if (vidDur > 2.0 && audDur > 2.0) (audDur / vidDur).toFloat() else 1.0f
+        val atempoPrefix = if (syncRatio in 0.70f..1.35f && kotlin.math.abs(syncRatio - 1.0f) > 0.015f) {
+            String.format(java.util.Locale.US, "atempo=%.4f,", syncRatio)
+        } else {
+            ""
+        }
+
         val padFilter = if (vidDur > 0.1) {
-            String.format(java.util.Locale.US, "[1:a]apad=whole_dur=%.3f[a_pad]", vidDur)
+            String.format(java.util.Locale.US, "[1:a]%sapad=whole_dur=%.3f[a_pad]", atempoPrefix, vidDur)
         } else {
             "[1:a]apad[a_pad]"
         }
@@ -264,14 +273,14 @@ class FFmpegEngine(private val context: Context) {
         val rawDur = getMediaDurationSeconds(inputAudio)
         val targetDur = targetDurationSeconds.coerceAtLeast(0.25)
 
-        val speed = if (rawDur > targetDur) {
-            (rawDur / targetDur).toFloat().coerceIn(1.0f, 1.30f)
+        val speed = if (rawDur > 0.1 && targetDur > 0.1) {
+            (rawDur / targetDur).toFloat().coerceIn(0.70f, 1.35f)
         } else {
             1.0f
         }
 
-        val effectiveDur = if (speed > 1.01f) rawDur / speed else rawDur
-        val atempoStr = if (kotlin.math.abs(speed - 1.0f) > 0.02f) {
+        val effectiveDur = if (kotlin.math.abs(speed - 1.0f) > 0.015f) rawDur / speed else rawDur
+        val atempoStr = if (kotlin.math.abs(speed - 1.0f) > 0.015f) {
             String.format(java.util.Locale.US, "atempo=%.4f", speed)
         } else {
             ""
@@ -288,7 +297,12 @@ class FFmpegEngine(private val context: Context) {
             if (atempoStr.isNotBlank()) atempoStr else "anull"
         }
 
-        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$filterStr\" -t ${String.format(java.util.Locale.US, "%.3f", targetDur)} -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
+        val codecArgs = if (outputWav.name.endsWith(".mp3", ignoreCase = true)) {
+            "-c:a libmp3lame -b:a 192k"
+        } else {
+            "-c:a pcm_s16le"
+        }
+        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$filterStr\" -t ${String.format(java.util.Locale.US, "%.3f", targetDur)} $codecArgs -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
         executeFfmpeg(cmd)
         if (!outputWav.exists() || outputWav.length() == 0L) {
             throw RuntimeException("Exact duration audio fit failed for ${inputAudio.name}")
@@ -397,8 +411,13 @@ class FFmpegEngine(private val context: Context) {
         val audDur = getMediaDurationSeconds(dubbedVoiceAudio)
         val targetVideoDur = if (vidDur > 0) vidDur / speed else 0.0
 
-        val effectiveAudioSpeed = speed
-        val effectiveHasSpeed = hasSpeed
+        val tempoAdjust = if (targetVideoDur > 2.0 && audDur > 2.0) {
+            val ratio = (audDur / targetVideoDur).toFloat()
+            if (ratio in 0.70f..1.35f && kotlin.math.abs(ratio - 1.0f) > 0.015f) ratio else 1.0f
+        } else 1.0f
+
+        val effectiveAudioSpeed = speed * tempoAdjust
+        val effectiveHasSpeed = hasSpeed || kotlin.math.abs(tempoAdjust - 1.0f) > 0.015f
 
         // Build atempo chain (handles speeds outside 0.5–2.0 range by chaining)
         val atempoStr: String = when {

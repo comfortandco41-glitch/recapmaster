@@ -216,12 +216,13 @@ class RecapPipelineManager(private val context: Context) {
                 }
 
                 log("🔊 [5/5] Synthesizing continuous recap narration via ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f, 0.25f)
+                val rawVoice = File(workDir, "raw_narration.${if (voiceProfile.isGemini) "wav" else "mp3"}")
                 if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
                     try {
                         geminiTtsClient.synthesizeSpeech(
                             apiKey = geminiApiKey,
                             text = scriptToDub,
-                            outputFile = voiceAudio,
+                            outputFile = rawVoice,
                             profile = voiceProfile
                         )
                         log("✅ Gemini AI voice narration synthesized successfully", progress = 0.78f, stageProgress = 1.0f)
@@ -229,9 +230,9 @@ class RecapPipelineManager(private val context: Context) {
                         log("⚠️ Gemini Voice API warning: ${e.message}. Gracefully falling back to Edge TTS...", progress = 0.72f, stageProgress = 0.50f)
                         edgeTtsClient.synthesizeSpeech(
                             text = scriptToDub,
-                            outputFile = voiceAudio,
+                            outputFile = rawVoice,
                             voiceName = "my-MM-ThihaNeural",
-                            rate = voiceProfile.rate.ifBlank { "+10%" },
+                            rate = voiceProfile.rate.ifBlank { "+0%" },
                             pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
                         )
                         log("✅ Fallback voice narration synthesized via Edge TTS", progress = 0.78f, stageProgress = 1.0f)
@@ -239,13 +240,71 @@ class RecapPipelineManager(private val context: Context) {
                 } else {
                     edgeTtsClient.synthesizeSpeech(
                         text = scriptToDub,
-                        outputFile = voiceAudio,
+                        outputFile = rawVoice,
                         voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
-                        rate = voiceProfile.rate.ifBlank { "+10%" },
+                        rate = voiceProfile.rate.ifBlank { "+0%" },
                         pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
                     )
                     log("✅ Edge TTS voice narration synthesized", progress = 0.78f, stageProgress = 1.0f)
                 }
+
+                // Check raw voice duration vs target video duration
+                var voiceToFit = rawVoice
+                val rawAudDur = ffmpegEngine.getMediaDurationSeconds(rawVoice)
+                val tailGap = videoDuration - rawAudDur
+                if (videoDuration > 10.0 && tailGap > 8.0) {
+                    log("🎙️ Narration finished early (${String.format(java.util.Locale.US, "%.1fs", rawAudDur)}): generating cinematic story outro for final ${String.format(java.util.Locale.US, "%.1fs", tailGap)}...", progress = 0.80f)
+                    try {
+                        val outroScript = geminiClient.generateConcludingNarration(
+                            contextDialogue = scriptToDub.takeLast(300),
+                            gapDurationSeconds = tailGap - 0.5,
+                            videoTitle = downloadRes.title
+                        )
+                        if (outroScript.isNotBlank()) {
+                            val outroRaw = File(workDir, "outro_narration.${if (voiceProfile.isGemini) "wav" else "mp3"}")
+                            if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                                try {
+                                    geminiTtsClient.synthesizeSpeech(geminiApiKey, outroScript, outroRaw, voiceProfile)
+                                } catch (_: Exception) {
+                                    edgeTtsClient.synthesizeSpeech(
+                                        text = outroScript,
+                                        outputFile = outroRaw,
+                                        voiceName = "my-MM-ThihaNeural",
+                                        rate = voiceProfile.rate.ifBlank { "+0%" },
+                                        pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                                    )
+                                }
+                            } else {
+                                edgeTtsClient.synthesizeSpeech(
+                                    text = outroScript,
+                                    outputFile = outroRaw,
+                                    voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
+                                    rate = voiceProfile.rate.ifBlank { "+0%" },
+                                    pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                                )
+                            }
+                            if (outroRaw.exists() && outroRaw.length() > 0L) {
+                                val concatList = File(workDir, "recap_concat.txt")
+                                concatList.writeText("file '${rawVoice.absolutePath}'\nfile '${outroRaw.absolutePath}'", Charsets.UTF_8)
+                                val combinedVoice = File(workDir, "combined_narration.wav")
+                                ffmpegEngine.concatAudioFiles(concatList, combinedVoice)
+                                if (combinedVoice.exists() && combinedVoice.length() > 0L) {
+                                    voiceToFit = combinedVoice
+                                }
+                            }
+                        }
+                    } catch (e: Throwable) {
+                        log("ℹ️ Outro synthesis note: ${e.message}", progress = 0.81f)
+                    }
+                }
+
+                // Strictly equalize audio track duration to match video duration 1:1
+                if (videoDuration > 1.0) {
+                    ffmpegEngine.fitSegmentExactDuration(voiceToFit, voiceAudio, targetDurationSeconds = videoDuration)
+                } else if (voiceToFit != voiceAudio) {
+                    voiceToFit.copyTo(voiceAudio, overwrite = true)
+                }
+                log("✅ Audio and visual duration synchronized to exactly ${String.format(java.util.Locale.US, "%.1fs", videoDuration)}", progress = 0.83f)
             }
 
             // Prepare instant synced preview video (fast stream copy)
@@ -519,13 +578,57 @@ class RecapPipelineManager(private val context: Context) {
             currentTimeline += finalPartDur
         }
 
-        // 4. Fill remaining silence to the end of the video
+        // 4. Fill remaining tail: if gap > 4.0s, generate concluding narration so voice does not end early
         val postGap = videoDuration - currentTimeline
-        if (postGap > 0.05) {
+        if (postGap > 4.0) {
+            try {
+                val geminiClient = GeminiClient(geminiApiKey)
+                val contextText = segments.takeLast(4).joinToString(" ") { it.text }
+                val outroScript = geminiClient.generateConcludingNarration(
+                    contextDialogue = contextText,
+                    gapDurationSeconds = postGap - 0.2,
+                    videoTitle = ""
+                )
+                if (outroScript.isNotBlank()) {
+                    val outroRaw = File(segmentsDir, "tail_concluding_raw.${if (voiceProfile.isGemini) "wav" else "mp3"}")
+                    val outroFitted = File(segmentsDir, "tail_concluding_fitted.wav")
+
+                    if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                        try {
+                            geminiTtsClient.synthesizeSpeech(geminiApiKey, outroScript, outroRaw, voiceProfile)
+                        } catch (_: Exception) {
+                            edgeTtsClient.synthesizeSpeech(
+                                text = outroScript,
+                                outputFile = outroRaw,
+                                voiceName = "my-MM-ThihaNeural",
+                                rate = voiceProfile.rate.ifBlank { "+0%" },
+                                pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                            )
+                        }
+                    } else {
+                        edgeTtsClient.synthesizeSpeech(
+                            text = outroScript,
+                            outputFile = outroRaw,
+                            voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
+                            rate = voiceProfile.rate.ifBlank { "+0%" },
+                            pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                        )
+                    }
+
+                    ffmpegEngine.fitSegmentExactDuration(outroRaw, outroFitted, targetDurationSeconds = postGap - 0.1)
+                    val fittedDur = ffmpegEngine.getMediaDurationSeconds(outroFitted)
+                    listEntries.add("file '${outroFitted.absolutePath}'")
+                    currentTimeline += fittedDur
+                }
+            } catch (_: Throwable) {}
+        }
+
+        val remainingTail = videoDuration - currentTimeline
+        if (remainingTail > 0.02) {
             val tailSilence = File(segmentsDir, "silence_tail.wav")
-            ffmpegEngine.writeSilenceWav(tailSilence, postGap)
+            ffmpegEngine.writeSilenceWav(tailSilence, remainingTail)
             listEntries.add("file '${tailSilence.absolutePath}'")
-            currentTimeline += postGap
+            currentTimeline += remainingTail
         }
 
         // 5. Concatenate all audio and silence files into a single unified synchronized audio track
@@ -603,13 +706,57 @@ class RecapPipelineManager(private val context: Context) {
             currentTimeline += finalPartDur
         }
 
-        // 4. Fill tail silence to the end of the video
+        // 4. Fill tail: if gap > 4.0s, generate concluding narration so voice does not end early
         val postGap = videoDuration - currentTimeline
-        if (postGap > 0.05) {
+        if (postGap > 4.0) {
+            try {
+                val geminiClient = GeminiClient(geminiApiKey)
+                val contextText = segments.takeLast(4).joinToString(" ") { it.text }
+                val outroScript = geminiClient.generateConcludingNarration(
+                    contextDialogue = contextText,
+                    gapDurationSeconds = postGap - 0.2,
+                    videoTitle = ""
+                )
+                if (outroScript.isNotBlank()) {
+                    val outroRaw = File(segmentsDir, "tail_concluding_raw.${if (voiceProfile.isGemini) "wav" else "mp3"}")
+                    val outroFitted = File(segmentsDir, "tail_concluding_fitted.wav")
+
+                    if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
+                        try {
+                            geminiTtsClient.synthesizeSpeech(geminiApiKey, outroScript, outroRaw, voiceProfile)
+                        } catch (_: Exception) {
+                            edgeTtsClient.synthesizeSpeech(
+                                text = outroScript,
+                                outputFile = outroRaw,
+                                voiceName = "my-MM-ThihaNeural",
+                                rate = voiceProfile.rate.ifBlank { "+0%" },
+                                pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                            )
+                        }
+                    } else {
+                        edgeTtsClient.synthesizeSpeech(
+                            text = outroScript,
+                            outputFile = outroRaw,
+                            voiceName = voiceProfile.voiceId.ifBlank { "my-MM-ThihaNeural" },
+                            rate = voiceProfile.rate.ifBlank { "+0%" },
+                            pitch = voiceProfile.pitch.ifBlank { "-2Hz" }
+                        )
+                    }
+
+                    ffmpegEngine.fitSegmentExactDuration(outroRaw, outroFitted, targetDurationSeconds = postGap - 0.1)
+                    val fittedDur = ffmpegEngine.getMediaDurationSeconds(outroFitted)
+                    listEntries.add("file '${outroFitted.absolutePath}'")
+                    currentTimeline += fittedDur
+                }
+            } catch (_: Throwable) {}
+        }
+
+        val remainingTail = videoDuration - currentTimeline
+        if (remainingTail > 0.02) {
             val tailSilence = File(segmentsDir, "silence_tail.wav")
-            ffmpegEngine.writeSilenceWav(tailSilence, postGap)
+            ffmpegEngine.writeSilenceWav(tailSilence, remainingTail)
             listEntries.add("file '${tailSilence.absolutePath}'")
-            currentTimeline += postGap
+            currentTimeline += remainingTail
         }
 
         // 5. Concatenate all audio and silence files into unified track

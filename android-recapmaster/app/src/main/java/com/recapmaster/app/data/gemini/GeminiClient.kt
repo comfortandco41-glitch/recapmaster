@@ -139,18 +139,43 @@ $batchJson
         return cleanMarkdownJson(rawResponse)
     }
 
+    suspend fun generateConcludingNarration(
+        contextDialogue: String,
+        gapDurationSeconds: Double,
+        videoTitle: String = ""
+    ): String = withContext(Dispatchers.IO) {
+        val durationSec = gapDurationSeconds.toInt().coerceAtLeast(4)
+        val targetWords = (durationSec * 1.6).toInt().coerceIn(6, 400)
+
+        val prompt = """
+You are a cinematic Burmese movie recap narrator (မြန်မာဘာသာ ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြသူ).
+The dialogue in the video has finished, but the video still has $durationSec seconds remaining until the very end.
+Write a concise, engaging concluding recap narration (ဇာတ်သိမ်း သုံးသပ်ချက် / ဇာတ်လမ်းအဆုံးသတ်စကား) in natural spoken Burmese to accompany this final $durationSec-second scene so the audio concludes together with the video.
+
+RULES:
+1. Target word count: EXACTLY around $targetWords words (to smoothly fill $durationSec seconds).
+2. Summarize the resolution or climax of the story.
+3. Write ONLY the spoken Burmese text. No intros, no markdown.
+
+Recent dialogue context:
+$contextDialogue
+        """.trimIndent()
+
+        callGemini(prompt)
+    }
+
     suspend fun generateRecapScript(
         burmeseTranscript: String,
         videoDurationSeconds: Double = 60.0,
         videoTitle: String = ""
     ): String = withContext(Dispatchers.IO) {
         val durationSec = if (videoDurationSeconds > 0) videoDurationSeconds.toInt() else 60
-        // Natural Burmese speech rate in Edge TTS / Gemini is ~1.8 words per second (108 words per minute).
-        // Target word count scales with durationSec so spoken narration spans the full video length.
-        val targetWordsExact = (durationSec * 1.80).toInt().coerceAtLeast(18)
-        val targetWordsMin = (durationSec * 1.65).toInt().coerceAtLeast(15)
-        val targetWordsMax = (durationSec * 1.95).toInt().coerceAtLeast(22)
-        val targetSentences = (durationSec / 6.0).toInt().coerceIn(3, 50)
+        // Natural Burmese speech rate in Edge TTS / Gemini is ~1.5 - 1.7 words per second.
+        // To fill durationSec completely, target words must be durationSec * 1.65
+        val targetWordsExact = (durationSec * 1.65).toInt().coerceAtLeast(20)
+        val targetWordsMin = (durationSec * 1.50).toInt().coerceAtLeast(18)
+        val targetWordsMax = (durationSec * 1.80).toInt().coerceAtLeast(25)
+        val targetSentences = (durationSec / 5.0).toInt().coerceIn(4, 50)
 
         val prompt = """
 You are an expert cinematic movie recap narrator in Burmese (မြန်မာဘာသာ ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြသူ).
@@ -161,12 +186,11 @@ CRITICAL DURATION & STORY PACING REQUIREMENTS:
    - Video Title / Topic: "${videoTitle.ifBlank { "Movie / Video Recap" }}"
    - Source Video Duration: Exactly $durationSec seconds (approx. ${durationSec / 60}m ${durationSec % 60}s).
    - MANDATORY: The spoken narration MUST span the ENTIRE video from the opening scene all the way to the final second ($durationSec s).
-   - Do NOT stop early or write a short 1-minute summary for a ${durationSec}s video!
+   - Do NOT stop early or write a short 1-minute summary for a ${durationSec}s video! Narration must actively describe the whole story up to $durationSec seconds.
 
 2. STRICT WORD COUNT BUDGET:
-   - Burmese speech rate is ~1.8 words per second.
-   - Target word count: EXACTLY around $targetWordsExact words (Strict budget: $targetWordsMin to $targetWordsMax words, approx. $targetSentences full narrative sentences).
-   - Ensure the narration covers the entire progression of the video (Hook -> Development -> Climax -> Ending resolution) so voice narration continues throughout the entire $durationSec seconds.
+   - Target word count: AT LEAST $targetWordsMin to $targetWordsExact words (Strict budget: $targetWordsMin to $targetWordsMax words, approx. $targetSentences full narrative sentences).
+   - If you write too few words, the voice will finish at 2 minutes and leave silence, which is a major error. Ensure full story coverage!
 
 3. SCRIPT FORMAT RULES:
    - Start immediately with the story action. NO greetings, NO intros (NO "မင်္ဂလာပါ", NO "ဒီဗီဒီယိုမှာတော့", NO "ယနေ့တော့", NO channel welcome).
