@@ -2,6 +2,10 @@
 #include <string>
 #include <vector>
 #include <sstream>
+#include <thread>
+#include <cmath>
+#include <algorithm>
+#include <cstring>
 #include <android/log.h>
 #include "whisper.h"
 
@@ -51,6 +55,10 @@ Java_com_recapmaster_app_engine_WhisperEngine_transcribePcm(
     std::vector<float> pcm(pcm_floats, pcm_floats + len);
     env->ReleaseFloatArrayElements(pcm_data_j, pcm_floats, JNI_ABORT);
 
+    // Detect hardware concurrency and utilize big/prime cores (e.g. Snapdragon 8 Gen 3)
+    unsigned int hw_threads = std::thread::hardware_concurrency();
+    int threads = (hw_threads > 0) ? std::min(8, (int)hw_threads) : 4;
+
     whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     wparams.print_realtime   = false;
     wparams.print_progress   = false;
@@ -58,15 +66,17 @@ Java_com_recapmaster_app_engine_WhisperEngine_transcribePcm(
     wparams.print_special    = false;
     wparams.translate        = false;
     wparams.language         = lang;
-    wparams.n_threads        = 4;
+    wparams.n_threads        = threads;
     wparams.offset_ms        = 0;
     wparams.no_context       = true; // Crucial: prevents hallucinations from previous windows causing early termination
     wparams.single_segment   = false;
     wparams.suppress_blank   = true;
     wparams.suppress_non_speech_tokens = true;
+    wparams.temperature      = 0.0f;
+    wparams.temperature_inc  = 0.0f; // Disable repeated fallback passes (prevents 6x slowdown on noise/music)
 
-    LOGI("Starting whisper transcription (%zu samples, approx %.1fs, lang: %s)...",
-         pcm.size(), pcm.size() / 16000.0, lang);
+    LOGI("Starting whisper transcription (%zu samples, approx %.1fs, lang: %s, threads: %d)...",
+         pcm.size(), pcm.size() / 16000.0, lang, threads);
 
     // Process audio in 30-second windows so that every chunk of audio (e.g. 0-30s, 30-60s, 60-90s, 90-120s, 120-150s+)
     // is transcribed with 100% independence, guaranteeing NO audio is missed or cut off past 90 seconds.
@@ -89,8 +99,33 @@ Java_com_recapmaster_app_engine_WhisperEngine_transcribePcm(
         const float* chunk_data = pcm.data() + offset;
         double window_offset_sec = static_cast<double>(offset) / sample_rate;
 
+        // Fast RMS voice activity / energy check: skip near-silent chunks in 0.001ms
+        float sum_sq = 0.0f;
+        size_t step = 16;
+        size_t samples_checked = 0;
+        for (size_t s = 0; s < current_len; s += step) {
+            sum_sq += chunk_data[s] * chunk_data[s];
+            samples_checked++;
+        }
+        float rms = (samples_checked > 0) ? std::sqrt(sum_sq / samples_checked) : 0.0f;
+        if (rms < 0.0025f) {
+            LOGI("Skipping silent window at %.1fs (RMS: %.5f)", window_offset_sec, rms);
+            offset += current_len;
+            continue;
+        }
+
         int ret = whisper_full(ctx, wparams, chunk_data, current_len);
         if (ret == 0) {
+            // Lock detected language for subsequent chunks to avoid re-running language detection on every window
+            if (strcmp(lang, "auto") == 0) {
+                int lang_id = whisper_full_lang_id(ctx);
+                if (lang_id >= 0) {
+                    const char *det = whisper_lang_str(lang_id);
+                    if (det && strlen(det) > 0) {
+                        wparams.language = det;
+                    }
+                }
+            }
             const int n_segments = whisper_full_n_segments(ctx);
             for (int i = 0; i < n_segments; ++i) {
                 int64_t seg_t0 = whisper_full_get_segment_t0(ctx, i) * 10; // ms

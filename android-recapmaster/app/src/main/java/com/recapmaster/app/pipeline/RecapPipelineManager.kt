@@ -154,7 +154,7 @@ class RecapPipelineManager(private val context: Context) {
             log("✅ Audio extracted (16kHz mono PCM)", progress = 0.32f, stageProgress = 1.0f)
 
             // Stage 3: On-Device Whisper Transcription
-            log("🧠 [3/5] Transcribing dialogue on-device with Whisper...", PipelineStage.TRANSCRIBING, progress = 0.35f, stageProgress = 0.15f)
+            log("🧠 [3/5] Transcribing dialogue on-device with Whisper (AI multithread accelerated)...", PipelineStage.TRANSCRIBING, progress = 0.35f, stageProgress = 0.20f)
             val modelFile = ensureWhisperModel()
             whisperEngine.loadModel(modelFile)
             val transcriptJson = whisperEngine.transcribeWav(extractedAudio, language = "auto")

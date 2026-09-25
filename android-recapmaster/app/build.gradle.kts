@@ -28,8 +28,9 @@ android {
 
         externalNativeBuild {
             cmake {
-                cppFlags.addAll(listOf("-std=c++17", "-O3", "-fexceptions", "-frtti"))
-                arguments.addAll(listOf("-DANDROID_STL=c++_shared"))
+                cFlags.addAll(listOf("-O3", "-funroll-loops", "-fPIC"))
+                cppFlags.addAll(listOf("-std=c++17", "-O3", "-funroll-loops", "-fexceptions", "-frtti", "-fPIC"))
+                arguments.addAll(listOf("-DANDROID_STL=c++_shared", "-DCMAKE_BUILD_TYPE=Release"))
             }
         }
     }
