@@ -292,7 +292,14 @@ class RecapPipelineManager(private val context: Context) {
                 playbackSpeed = playbackSpeed,
                 blurBox = blurBox,
                 fontsDir = fontsDir,
-                soundStyle = soundStyle
+                soundStyle = soundStyle,
+                onProgress = { pct, msg ->
+                    val overallProgress = 0.92f + (pct * 0.06f)
+                    _state.value = _state.value.copy(
+                        progress = overallProgress,
+                        message = "🎬 $msg"
+                    )
+                }
             )
             log("✅ Video composed successfully", progress = 0.98f)
 

@@ -844,6 +844,7 @@ fun RecapStudioScreen(
                     Button(
                         onClick = {
                             try {
+                                exoPlayer?.pause()
                                 onStartPipeline(
                                     PipelineParams(
                                         action        = "COMPOSE",

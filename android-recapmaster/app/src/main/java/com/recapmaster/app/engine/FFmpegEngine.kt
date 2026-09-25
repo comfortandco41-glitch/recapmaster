@@ -64,37 +64,32 @@ class FFmpegEngine(private val context: Context) {
 
     /**
      * Maps a sound style preset name to an FFmpeg audio filter chain.
-     * These simulate the server-side Python mastering presets using FFmpegKit.
+     * Uses fast, lightweight EQ, dynamic compressor, and volume gain without slow loudnorm buffering.
      */
     private fun soundStyleAudioFilter(soundStyle: String): String = when (soundStyle) {
         // Epic bass boost + presence lift for movie trailers
         "cinematic_recap" ->
-            "equalizer=f=80:t=o:w=2:g=5,equalizer=f=3000:t=o:w=1.5:g=3," +
-            "acompressor=threshold=-18dB:ratio=4:attack=5:release=100:makeup=3dB," +
-            "loudnorm=I=-16:LRA=11:TP=-1.5"
+            "equalizer=f=80:t=o:w=2:g=4,equalizer=f=3000:t=o:w=1.5:g=3," +
+            "acompressor=threshold=-18dB:ratio=4:attack=5:release=100:makeup=3dB,volume=1.2"
         // High tension, clipped highs, tight compression
         "dramatic_suspense" ->
             "equalizer=f=200:t=o:w=2:g=-2,equalizer=f=5000:t=o:w=2:g=4," +
-            "acompressor=threshold=-20dB:ratio=6:attack=2:release=60:makeup=4dB," +
-            "loudnorm=I=-14:LRA=8:TP=-1.5"
+            "acompressor=threshold=-20dB:ratio=6:attack=2:release=60:makeup=4dB,volume=1.2"
         // Punchy mid-boost, fast transients
         "energetic_action" ->
             "equalizer=f=100:t=o:w=2:g=4,equalizer=f=2000:t=o:w=2:g=3," +
-            "acompressor=threshold=-22dB:ratio=5:attack=1:release=40:makeup=5dB," +
-            "loudnorm=I=-14:LRA=7:TP=-1"
+            "acompressor=threshold=-22dB:ratio=5:attack=1:release=40:makeup=5dB,volume=1.2"
         // Warm low-mids, soft highs, gentle compression
         "emotional_warmth" ->
             "equalizer=f=250:t=o:w=2:g=3,equalizer=f=8000:t=o:w=1.5:g=-2," +
-            "acompressor=threshold=-24dB:ratio=2.5:attack=10:release=200:makeup=2dB," +
-            "loudnorm=I=-18:LRA=14:TP=-2"
+            "acompressor=threshold=-24dB:ratio=2.5:attack=10:release=200:makeup=2dB,volume=1.2"
         // Flat, clean, broadcast standard
         "broadcast_studio" ->
             "highpass=f=80,lowpass=f=16000," +
-            "acompressor=threshold=-20dB:ratio=3:attack=5:release=100:makeup=2dB," +
-            "loudnorm=I=-16:LRA=11:TP=-1.5"
-        // Default: gentle normalisation only
+            "acompressor=threshold=-20dB:ratio=3:attack=5:release=100:makeup=2dB,volume=1.2"
+        // Default: gentle boost
         else ->
-            "loudnorm=I=-16:LRA=11:TP=-1.5"
+            "volume=1.2"
     }
 
     /**
@@ -120,9 +115,16 @@ class FFmpegEngine(private val context: Context) {
         outputVideo: File
     ): File = withContext(Dispatchers.IO) {
         outputVideo.parentFile?.mkdirs()
+        val vidDur = getMediaDurationSeconds(sourceVideo)
+        val padFilter = if (vidDur > 0.1) {
+            String.format(java.util.Locale.US, "[1:a]apad=whole_dur=%.3f[a_pad]", vidDur)
+        } else {
+            "[1:a]apad[a_pad]"
+        }
+        val tArg = if (vidDur > 0.1) String.format(java.util.Locale.US, "-t %.3f", vidDur) else "-shortest"
         val cmd = "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
-                "-filter_complex \"[1:a]apad[a_pad]\" -map 0:v:0 -map \"[a_pad]\" " +
-                "-c:v copy -c:a aac -b:a 128k -shortest \"${outputVideo.absolutePath}\""
+                "-filter_complex \"$padFilter\" -map 0:v:0 -map \"[a_pad]\" " +
+                "-c:v copy -c:a aac -b:a 128k $tArg \"${outputVideo.absolutePath}\""
         executeFfmpeg(cmd)
         if (!outputVideo.exists() || outputVideo.length() == 0L) {
             throw RuntimeException("Preview mux failed: output file is empty")
@@ -146,7 +148,8 @@ class FFmpegEngine(private val context: Context) {
         playbackSpeed: Float = 1.0f,
         blurBox: BlurBoxConfig = BlurBoxConfig(),
         fontsDir: File? = null,
-        soundStyle: String = "cinematic_recap"
+        soundStyle: String = "cinematic_recap",
+        onProgress: ((progressPct: Float, message: String) -> Unit)? = null
     ): File = withContext(Dispatchers.IO) {
         outputVideo.parentFile?.mkdirs()
 
@@ -230,29 +233,42 @@ class FFmpegEngine(private val context: Context) {
                 String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", effectiveAudioSpeed * 2.0f)
         }
 
-        // ── Assemble final FFmpeg command ─────────────────────────────────
-        val audioPart = if (effectiveHasSpeed) {
-            "[1:a]${atempoStr},${audioEq},apad[a_out]"
+        val durationLimit = if (targetVideoDur > 0.1) targetVideoDur else if (vidDur > 0.1) vidDur else 0.0
+        val apadFilter = if (durationLimit > 0.1) {
+            String.format(java.util.Locale.US, "apad=whole_dur=%.3f", durationLimit)
         } else {
-            "[1:a]${audioEq},apad[a_out]"
+            "apad"
         }
 
+        val audioPart = if (effectiveHasSpeed) {
+            "[1:a]${atempoStr},${audioEq},${apadFilter}[a_out]"
+        } else {
+            "[1:a]${audioEq},${apadFilter}[a_out]"
+        }
+
+        val timeLimitArg = if (durationLimit > 0.1) {
+            String.format(java.util.Locale.US, "-t %.3f", durationLimit)
+        } else {
+            "-shortest"
+        }
+
+        // ── Assemble final FFmpeg command ─────────────────────────────────
         val cmd: String = if (hasVideoFilter) {
             val fullFilter = "$videoFilterStr;$audioPart"
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$fullFilter\" " +
                 "-map \"[$currentV]\" -map \"[a_out]\" " +
-                "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
-                "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
+                "-c:v libx264 -preset ultrafast -crf 23 -threads 0 -pix_fmt yuv420p " +
+                "-c:a aac -b:a 192k $timeLimitArg \"${outputVideo.absolutePath}\""
         } else {
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$audioPart\" " +
                 "-map 0:v:0 -map \"[a_out]\" " +
-                "-c:v libx264 -preset ultrafast -crf 23 -pix_fmt yuv420p " +
-                "-c:a aac -b:a 192k -shortest \"${outputVideo.absolutePath}\""
+                "-c:v libx264 -preset ultrafast -crf 23 -threads 0 -pix_fmt yuv420p " +
+                "-c:a aac -b:a 192k $timeLimitArg \"${outputVideo.absolutePath}\""
         }
 
-        executeFfmpeg(cmd)
+        executeFfmpeg(cmd, totalDurationSeconds = durationLimit, onProgress = onProgress)
 
         if (!outputVideo.exists() || outputVideo.length() == 0L) {
             throw RuntimeException("Video rendering failed: output file is empty or missing")
@@ -261,17 +277,41 @@ class FFmpegEngine(private val context: Context) {
         outputVideo
     }
 
-    private suspend fun executeFfmpeg(cmd: String) = suspendCancellableCoroutine<Unit> { cont ->
-        val session = FFmpegKit.executeAsync(cmd) { completedSession ->
-            if (ReturnCode.isSuccess(completedSession.returnCode)) {
-                if (cont.isActive) cont.resume(Unit)
-            } else {
-                val failMsg = completedSession.failStackTrace
-                    ?: completedSession.allLogsAsString
-                    ?: "Unknown FFmpeg error"
-                if (cont.isActive) cont.resumeWithException(RuntimeException("FFmpeg failed: $failMsg"))
+    private suspend fun executeFfmpeg(
+        cmd: String,
+        totalDurationSeconds: Double = 0.0,
+        onProgress: ((progressPct: Float, message: String) -> Unit)? = null
+    ) = suspendCancellableCoroutine<Unit> { cont ->
+        var lastReportMs = 0L
+        val session = FFmpegKit.executeAsync(
+            cmd,
+            { completedSession ->
+                if (ReturnCode.isSuccess(completedSession.returnCode)) {
+                    if (cont.isActive) cont.resume(Unit)
+                } else {
+                    val failMsg = completedSession.failStackTrace
+                        ?: completedSession.allLogsAsString
+                        ?: "Unknown FFmpeg error"
+                    if (cont.isActive) cont.resumeWithException(RuntimeException("FFmpeg failed: $failMsg"))
+                }
+            },
+            { /* logCallback */ },
+            { statistics ->
+                if (onProgress != null && totalDurationSeconds > 0.0) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastReportMs >= 300) {
+                        lastReportMs = now
+                        val timeInSec = statistics.time / 1000.0
+                        val pct = (timeInSec / totalDurationSeconds).coerceIn(0.0, 1.0).toFloat()
+                        val speed = statistics.speed
+                        val frame = statistics.videoFrameNumber
+                        val speedStr = if (speed > 0) String.format(java.util.Locale.US, " (%.1fx)", speed) else ""
+                        val msg = "Encoding video: ${(pct * 100).toInt()}% [frame $frame$speedStr]"
+                        onProgress(pct, msg)
+                    }
+                }
             }
-        }
+        )
         cont.invokeOnCancellation { session.cancel() }
     }
 }
