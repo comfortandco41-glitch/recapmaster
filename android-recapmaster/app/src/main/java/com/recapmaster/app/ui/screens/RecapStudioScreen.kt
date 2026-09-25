@@ -1,6 +1,11 @@
 package com.recapmaster.app.ui.screens
 
 import android.content.Intent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.auth.api.signin.GoogleSignIn
+import com.google.android.gms.common.api.ApiException
+import com.recapmaster.app.auth.AuthManager
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -86,6 +91,44 @@ fun RecapStudioScreen(
 ) {
     val context = LocalContext.current
     val pipelineState by pipelineManager.state.collectAsState()
+
+    // ── Authentication State (Firebase & Google) ──────────────────────────────
+    val currentUser by AuthManager.currentUser.collectAsState()
+    var isSigningIn by remember { mutableStateOf(false) }
+    var authMessage by remember { mutableStateOf<String?>(null) }
+    var profileMenuExpanded by remember { mutableStateOf(false) }
+
+    val webClientId = remember(context) { AuthManager.getWebClientId(context) }
+    val googleSignInLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        isSigningIn = false
+        val task = GoogleSignIn.getSignedInAccountFromIntent(result.data)
+        try {
+            val account = task.getResult(ApiException::class.java)
+            val idToken = account?.idToken
+            if (!idToken.isNullOrBlank()) {
+                isSigningIn = true
+                AuthManager.signInWithGoogleIdToken(
+                    idToken = idToken,
+                    onSuccess = { user ->
+                        isSigningIn = false
+                        authMessage = "✅ Logged in as ${user.displayName ?: user.email ?: "User"}"
+                    },
+                    onError = { err ->
+                        isSigningIn = false
+                        authMessage = "❌ Sign-in failed: $err"
+                    }
+                )
+            } else {
+                authMessage = "⚠️ Google ID token missing. Please re-download google-services.json from Firebase."
+            }
+        } catch (e: ApiException) {
+            authMessage = "⚠️ Google Sign-In (${e.statusCode}): ${e.message}"
+        } catch (e: Throwable) {
+            authMessage = "❌ Sign-In error: ${e.message}"
+        }
+    }
 
     // ── Input state ───────────────────────────────────────────────────────────
     var urlInput       by remember { mutableStateOf("") }
@@ -225,6 +268,78 @@ fun RecapStudioScreen(
                         }
                     }
                 },
+                actions = {
+                    val user = currentUser
+                    if (user != null) {
+                        Box {
+                            IconButton(onClick = { profileMenuExpanded = true }) {
+                                Surface(
+                                    shape = RoundedCornerShape(20.dp),
+                                    color = Purple,
+                                    modifier = Modifier.size(32.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = user.displayName?.take(1)?.uppercase() ?: user.email?.take(1)?.uppercase() ?: "U",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 13.sp
+                                        )
+                                    }
+                                }
+                            }
+                            DropdownMenu(
+                                expanded = profileMenuExpanded,
+                                onDismissRequest = { profileMenuExpanded = false },
+                                modifier = Modifier.background(BgCardAlt)
+                            ) {
+                                DropdownMenuItem(
+                                    text = {
+                                        Column {
+                                            Text(user.displayName ?: "Google User", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = TextPrimary)
+                                            Text(user.email ?: "", fontSize = 11.sp, color = TextMuted)
+                                        }
+                                    },
+                                    onClick = {},
+                                    leadingIcon = { Icon(Icons.Default.AccountCircle, contentDescription = null, tint = Cyan) }
+                                )
+                                HorizontalDivider(color = Border)
+                                DropdownMenuItem(
+                                    text = { Text("Sign Out", color = Red, fontSize = 12.sp) },
+                                    leadingIcon = { Icon(Icons.Default.Logout, contentDescription = null, tint = Red) },
+                                    onClick = {
+                                        profileMenuExpanded = false
+                                        AuthManager.signOut(context) {
+                                            authMessage = "Logged out successfully."
+                                        }
+                                    }
+                                )
+                            }
+                        }
+                    } else {
+                        Button(
+                            onClick = {
+                                if (webClientId.isNullOrBlank()) {
+                                    authMessage = "⚠️ Google Web Client ID not found. Please re-download google-services.json from Firebase Console after adding SHA-1."
+                                }
+                                val client = AuthManager.getGoogleSignInClient(context, webClientId)
+                                googleSignInLauncher.launch(client.signInIntent)
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color.White, contentColor = Color.Black),
+                            shape = RoundedCornerShape(18.dp),
+                            contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                            modifier = Modifier.height(34.dp)
+                        ) {
+                            if (isSigningIn) {
+                                CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(14.dp), strokeWidth = 1.5.dp)
+                            } else {
+                                Icon(Icons.Default.AccountCircle, contentDescription = null, modifier = Modifier.size(16.dp), tint = Color(0xFF4285F4))
+                                Spacer(modifier = Modifier.width(4.dp))
+                                Text("Sign In", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = BgCard,
                     titleContentColor = TextPrimary
@@ -241,6 +356,27 @@ fun RecapStudioScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
+
+            // ── Auth Status Banner (Notifications / Alerts) ───────────────
+            AnimatedVisibility(visible = authMessage != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = BgCardAlt,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(authMessage ?: "", fontSize = 11.sp, color = TextPrimary, modifier = Modifier.weight(1f))
+                        IconButton(onClick = { authMessage = null }, modifier = Modifier.size(24.dp)) {
+                            Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(14.dp))
+                        }
+                    }
+                }
+            }
 
             // ── Card 1: Source ────────────────────────────────────────────
             StudioCard(title = "1. Source Video", icon = Icons.Default.VideoLibrary, accentColor = Purple) {
