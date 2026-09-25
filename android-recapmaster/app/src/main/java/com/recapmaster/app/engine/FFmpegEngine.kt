@@ -186,7 +186,8 @@ class FFmpegEngine(private val context: Context) {
         speedFactor: Float = 1.0f
     ): File = withContext(Dispatchers.IO) {
         outputWav.parentFile?.mkdirs()
-        val speed = speedFactor.coerceIn(0.5f, 2.0f)
+        // Natural speed bounds: never slow down (< 1.0x), only gently accelerate up to 1.15x
+        val speed = speedFactor.coerceIn(1.0f, 1.15f)
         val filter = if (kotlin.math.abs(speed - 1.0f) > 0.02f) {
             String.format(java.util.Locale.US, "-filter:a \"atempo=%.4f\"", speed)
         } else {
@@ -201,8 +202,9 @@ class FFmpegEngine(private val context: Context) {
     }
 
     /**
-     * Stretches or compresses dialogue audio using atempo, pads with silence, and trims with -t
-     * so that the resulting WAV matches the target duration of the original SRT segment 100% exactly.
+     * Preserves natural 100% human speech speed. Never slows down below 1.0x (avoids robot drag),
+     * gently accelerates by at most 1.15x if slightly longer, and pads with natural silence if shorter.
+     * Never abruptly cuts off spoken words.
      */
     suspend fun fitSegmentExactDuration(
         inputAudio: File,
@@ -213,22 +215,22 @@ class FFmpegEngine(private val context: Context) {
         val rawDur = getMediaDurationSeconds(inputAudio)
         val targetDur = targetDurationSeconds.coerceAtLeast(0.2)
 
-        val speed = if (rawDur > 0.05) {
-            (rawDur / targetDur).toFloat().coerceIn(0.5f, 2.5f)
+        // Rule 1: Never slow down below 1.0x (prevents sluggish/dragging robot voice).
+        // Rule 2: If speech is longer than targetDur, only gently accelerate up to 1.15x (imperceptible natural tempo).
+        val speed = if (rawDur > targetDur && targetDur > 0.1) {
+            (rawDur / targetDur).toFloat().coerceIn(1.0f, 1.15f)
         } else {
             1.0f
         }
 
-        val atempoStr = when {
-            speed in 0.5f..2.0f -> String.format(java.util.Locale.US, "atempo=%.4f", speed)
-            speed > 2.0f -> String.format(java.util.Locale.US, "atempo=2.0,atempo=%.4f", speed / 2.0f)
-            else -> String.format(java.util.Locale.US, "atempo=0.5,atempo=%.4f", speed * 2.0f)
-        }
+        val effectiveDur = if (speed > 1.01f) rawDur / speed else rawDur
+        // If the speech is shorter than targetDur, pad with silence up to targetDur
+        // If it is slightly longer (after 1.15x tempo), allow it to finish fully without truncation
+        val padTarget = kotlin.math.max(targetDur, effectiveDur)
+        val atempoStr = String.format(java.util.Locale.US, "atempo=%.4f", speed)
+        val padStr = String.format(java.util.Locale.US, "apad=whole_dur=%.3f", padTarget)
 
-        val padStr = String.format(java.util.Locale.US, "apad=whole_dur=%.3f", targetDur)
-        val tArg = String.format(java.util.Locale.US, "-t %.3f", targetDur)
-
-        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$atempoStr,$padStr\" $tArg -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
+        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$atempoStr,$padStr\" -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
         executeFfmpeg(cmd)
         if (!outputWav.exists() || outputWav.length() == 0L) {
             throw RuntimeException("Exact duration audio fit failed for ${inputAudio.name}")

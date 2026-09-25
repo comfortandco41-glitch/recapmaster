@@ -21,17 +21,19 @@ class GeminiClient(private val apiKey: String) {
 
     suspend fun translateToBurmese(transcriptJson: String): String = withContext(Dispatchers.IO) {
         val prompt = """
-You are a professional movie subtitle & dubbing translator specializing in natural, fluent, lip-synced Burmese (မြန်မာဘာသာ ဒါဘင်ပြန်ဆိုသူ).
-Translate the following dialogue transcript segments into fluent, idiomatic Burmese.
+You are an award-winning movie dubbing translator specializing in natural, concise, lip-synced Burmese (မြန်မာဘာသာ ဒါဘင်ပြန်ဆိုသူ).
+Translate the following dialogue transcript segments into natural spoken Burmese.
 
-CRITICAL DURATION & TIMING CONSTRAINTS:
-1. Preserve EXACT timestamps ("start" and "end" in seconds) and segment array structure.
-2. In movie dubbing, the spoken Burmese duration must fit within the scene window (duration = end - start seconds).
-3. Burmese speech averages ~2.5 words (approx 4-6 syllables) per second.
-   - For short scenes (1-3s): Keep the Burmese concise, punchy, and direct. Avoid verbose formal prefixes or filler words.
-   - For longer scenes (4-8s): Match the natural conversational flow.
+CRITICAL DURATION & CONCISE TIMING CONSTRAINTS:
+1. Preserve EXACT timestamps ("start" and "end" in seconds) and the JSON structure.
+2. In movie dubbing, the spoken Burmese length MUST strictly fit the original dialogue scene duration (duration = end - start seconds).
+3. Burmese speech rate is ~1.8 words (approx 3.5 to 4 syllables) per second.
+   - For every segment, calculate max allowed words = max(2, ((end - start) * 1.8).toInt()).
+   - STRICT RULE: Do NOT write long or wordy Burmese sentences! If the original scene is 1.5 seconds, use AT MOST 3-4 words.
+   - For short scenes (1-2s): Be punchy, direct, and colloquial. No formal filler words.
+   - For medium scenes (3-5s): Keep sentences tight and concise so the voice speaks at a natural, comfortable tempo without having to rush or drag.
 4. Output ONLY valid JSON in this exact structure without markdown or backticks:
-{"segments": [{"start": 0.0, "end": 4.0, "text": "မြန်မာဘာသာပြန်စာတန်း"}]}
+{"segments": [{"start": 0.0, "end": 4.0, "text": "မြန်မာစကားပြော ပြန်ဆိုချက်"}]}
 
 Transcript to translate:
 $transcriptJson
@@ -46,28 +48,30 @@ $transcriptJson
         videoTitle: String = ""
     ): String = withContext(Dispatchers.IO) {
         val durationSec = if (videoDurationSeconds > 0) videoDurationSeconds.toInt() else 60
-        // Natural Burmese speech rate is ~2.2 words per second (130 words per minute)
-        // Burmese sentences average 10-15 words, each taking ~5-7 seconds to speak naturally.
-        val targetSentences = (durationSec / 5.5).toInt().coerceAtLeast(10)
-        val targetWords = (durationSec * 2.2).toInt().coerceAtLeast(120)
+        // Natural Burmese speech rate in Edge TTS / Gemini is ~1.8 words per second (108 words per minute).
+        // To match an exact 1-minute video, the script must be strictly ~105-112 words so audio finishes with visual.
+        val targetWordsExact = (durationSec * 1.80).toInt().coerceAtLeast(18)
+        val targetWordsMin = (durationSec * 1.65).toInt().coerceAtLeast(15)
+        val targetWordsMax = (durationSec * 1.95).toInt().coerceAtLeast(22)
+        val targetSentences = (durationSec / 6.0).toInt().coerceIn(3, 30)
 
         val prompt = """
 You are an expert cinematic movie recap narrator in Burmese (မြန်မာဘာသာ ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြသူ).
-Write a continuous, engaging, dramatic, and detailed Burmese recap narration script that covers the ENTIRE duration of the video.
+Write a concise, engaging, dramatic Burmese recap narration script that EXACTLY matches the $durationSec-second duration of the video.
 
 CRITICAL DURATION & STORY PACING REQUIREMENTS:
-1. VIDEO CONTEXT & FULL DURATION:
+1. VIDEO CONTEXT & EXACT DURATION:
    - Video Title / Topic: "${videoTitle.ifBlank { "Movie / Video Recap" }}"
    - Source Video Duration: Exactly $durationSec seconds (approx. ${durationSec / 60}m ${durationSec % 60}s).
-   - MANDATORY: The narration MUST span the ENTIRE $durationSec seconds from start to the very end of the video.
-   - Do NOT stop early! Even if the dialogue transcript ends early or only covers the first part of the video, you MUST continue narrating the complete storyline, character actions, emotional reactions, dramatic turning point, climax, and heartwarming/concluding moral message all the way to the final seconds ($durationSec s).
+   - MANDATORY: The spoken narration MUST fit the exact $durationSec-second visual timeline.
+   - If the video is 1 minute ($durationSec s), the Burmese narration MUST conclude precisely around $durationSec seconds. Do NOT make it overly long or add unnecessary filler!
 
-2. REQUIRED SCRIPT LENGTH & STRUCTURE:
-   - Target word count: AT LEAST $targetWords Burmese words (minimum $targetSentences complete Burmese sentences ending with '။').
-   - Structure the narration across 3 distinct timeline acts so the story flows continuously:
-     * Beginning (0s - 30%): Introduce the scene, characters, setting, and initial conflict or encounter.
-     * Middle (30% - 70%): Describe the unfolding drama, actions, challenges, emotions, and key interactions.
-     * Climax & Ending (70% - 100%): Describe the peak emotional moment, resolution, bond, gratitude, and final conclusion right up to the end of the video ($durationSec seconds).
+2. STRICT WORD COUNT BUDGET:
+   - Burmese speech rate is ~1.8 words per second.
+   - Target word count: EXACTLY around $targetWordsExact words (Strict budget: $targetWordsMin to $targetWordsMax words, ~ $targetSentences complete sentences).
+   - Do NOT write more than $targetWordsMax words, otherwise audio will overrun the video!
+   - Do NOT write fewer than $targetWordsMin words, otherwise narration will finish prematurely!
+   - Ensure the story has a complete arc (Beginning hook -> Core action -> Climax/Ending) neatly condensed into this exact word budget so audio and video conclude at the exact same moment.
 
 3. SCRIPT FORMAT RULES:
    - Start immediately with the story action. NO greetings, NO intros (NO "မင်္ဂလာပါ", NO "ဒီဗီဒီယိုမှာတော့", NO "ယနေ့တော့", NO channel welcome).

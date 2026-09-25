@@ -158,13 +158,17 @@ class RecapPipelineManager(private val context: Context) {
             val videoDuration = if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
 
             val dialogueSegments = parseDialogueSegments(burmeseTranscript)
-            val mergedSegments = mergeCloseDialogueSegments(dialogueSegments)
+            // Merge close micro-fragments (< 0.45s apart) for exact SRT sync to avoid split sentence chopping
+            val srtSegments = mergeCloseDialogueSegments(dialogueSegments, minGapSeconds = 0.45)
+            // Merge scene pauses (< 0.85s apart) for scene flow
+            val mergedSegments = mergeCloseDialogueSegments(dialogueSegments, minGapSeconds = 0.85)
 
             // Stage 5: Voice Dubbing (Exact SRT Sync vs Scene Flow vs Story Recap)
             if (dubbingMode == "EXACT_SRT_SYNC" && dialogueSegments.isNotEmpty()) {
-                log("🔊 [5/5] Synthesizing exact SRT timestamp dubbing (${dialogueSegments.size} segments) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
+                val segmentsToDub = if (srtSegments.isNotEmpty()) srtSegments else dialogueSegments
+                log("🔊 [5/5] Synthesizing exact SRT timestamp dubbing (${segmentsToDub.size} segments) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
                 synthesizeExactTimestampDubbedAudio(
-                    segments = dialogueSegments,
+                    segments = segmentsToDub,
                     videoDuration = videoDuration,
                     voiceProfile = voiceProfile,
                     geminiApiKey = geminiApiKey,
@@ -172,7 +176,7 @@ class RecapPipelineManager(private val context: Context) {
                     outputAudioFile = voiceAudio,
                     onProgress = { p, msg -> log(msg, progress = p) }
                 )
-                log("✅ Exact SRT timestamp dubbing generated (1:1 duration match)", progress = 0.82f)
+                log("✅ Exact SRT timestamp dubbing generated with dynamic non-overlapping sync", progress = 0.82f)
             } else if (dubbingMode == "DIALOGUE_SYNC" && mergedSegments.isNotEmpty()) {
                 log("🔊 [5/5] Synthesizing scene-aligned dialogue (${mergedSegments.size} scenes) with ${voiceProfile.engine.displayName}...", PipelineStage.DUBBING_VOICE, 0.68f)
                 synthesizeDialogueDubbedAudio(
@@ -441,9 +445,16 @@ class RecapPipelineManager(private val context: Context) {
             // Available time before next dialogue starts (ensures no overlapping between characters)
             val maxAvailableWindow = kotlin.math.max(targetSceneWindow, (nextStart - seg.start).coerceAtLeast(targetSceneWindow))
 
-            // 1. If there is a silence gap before this segment, write exact silence WAV
-            val preGap = seg.start - currentTimeline
-            if (preGap > 0.04) {
+            // 1. Dynamic Shift: If previous speech ran past seg.start, gracefully shift
+            // the start time with a natural 180ms conversational pause so lines never collide
+            val scheduledStart = if (currentTimeline > 0.0) {
+                kotlin.math.max(seg.start, currentTimeline + 0.18)
+            } else {
+                seg.start
+            }
+
+            val preGap = scheduledStart - currentTimeline
+            if (preGap > 0.02) {
                 val silenceFile = File(segmentsDir, "silence_${i}.wav")
                 ffmpegEngine.writeSilenceWav(silenceFile, preGap)
                 listEntries.add("file '${silenceFile.absolutePath}'")
@@ -480,12 +491,10 @@ class RecapPipelineManager(private val context: Context) {
                 )
             }
 
-            // 3. Measure duration and apply dynamic tempo fitting if Burmese speech exceeds scene window
+            // 3. Measure duration and apply natural tempo fitting (max 1.15x) if Burmese speech exceeds scene window
             val rawDur = ffmpegEngine.getMediaDurationSeconds(rawClip)
-            val speedFactor = if (rawDur > maxAvailableWindow && maxAvailableWindow > 0.5) {
-                (rawDur / maxAvailableWindow).toFloat().coerceIn(1.0f, 1.40f)
-            } else if (rawDur > targetSceneWindow * 1.25 && targetSceneWindow > 0.5) {
-                (rawDur / (targetSceneWindow * 1.15)).toFloat().coerceIn(1.0f, 1.30f)
+            val speedFactor = if (rawDur > targetSceneWindow * 1.10 && targetSceneWindow > 0.4) {
+                (rawDur / targetSceneWindow).toFloat().coerceIn(1.0f, 1.15f)
             } else {
                 1.0f
             }
@@ -532,8 +541,15 @@ class RecapPipelineManager(private val context: Context) {
             val seg = segments[i]
             val targetDur = (seg.end - seg.start).coerceAtLeast(0.3)
 
-            // 1. Precise silence gap so audio starts at exact SRT start timestamp
-            val preGap = seg.start - currentTimeline
+            // 1. Dynamic Shift: If previous line's speech ran past this segment's start,
+            // gracefully shift the next line back with a natural 180ms breathing pause so voices never collide.
+            val scheduledStart = if (currentTimeline > 0.0) {
+                kotlin.math.max(seg.start, currentTimeline + 0.18)
+            } else {
+                seg.start
+            }
+
+            val preGap = scheduledStart - currentTimeline
             if (preGap > 0.02) {
                 val silenceFile = File(segmentsDir, "silence_${i}.wav")
                 ffmpegEngine.writeSilenceWav(silenceFile, preGap)
