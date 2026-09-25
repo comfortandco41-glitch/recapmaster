@@ -31,7 +31,7 @@ enum class PipelineStage {
     TRANSCRIBING,
     TRANSLATING_SCRIPT,
     DUBBING_VOICE,
-    DUBBED_READY,        // Video & audio dubbed; waiting for user live subtitle & watermark tuning
+    DUBBED_READY,        // Video & audio dubbed; waiting for user live watermark & speed tuning
     COMPOSING_VIDEO,
     COMPLETED,
     FAILED
@@ -235,7 +235,7 @@ class RecapPipelineManager(private val context: Context) {
             }
 
             // Prepare instant synced preview video (fast stream copy)
-            log("⚡ Preparing synchronized video for live subtitle & blur preview...", progress = 0.85f)
+            log("⚡ Preparing synchronized video for live watermark & blur preview...", progress = 0.85f)
             try {
                 ffmpegEngine.muxPreviewDubbedVideo(downloadRes.localFile, voiceAudio, previewVideo)
             } catch (e: Throwable) {
@@ -249,15 +249,13 @@ class RecapPipelineManager(private val context: Context) {
             activeBurmeseTranscript = burmeseTranscript
             activePreviewVideo = if (previewVideo.exists() && previewVideo.length() > 0) previewVideo else downloadRes.localFile
 
-            val sampleSubtitleText = extractFirstSubtitleSnippet(burmeseTranscript)
-
-            log("✨ Video dubbed successfully! Ready for live subtitle & watermark blur tuning.", PipelineStage.DUBBED_READY, 0.90f)
+            log("✨ Video dubbed successfully! Ready for live watermark blur & speed tuning.", PipelineStage.DUBBED_READY, 0.90f)
             _state.value = _state.value.copy(
                 stage = PipelineStage.DUBBED_READY,
                 progress = 0.90f,
                 dubbedPreviewUri = Uri.fromFile(activePreviewVideo),
-                previewSubtitleText = sampleSubtitleText,
-                message = "✨ Video dubbed! You can now adjust Subtitles & Blur Watermark with Live Preview."
+                previewSubtitleText = "",
+                message = "✨ Video dubbed! You can now adjust Watermark Blur & Playback Speed."
             )
 
         } catch (e: Throwable) {
@@ -276,11 +274,11 @@ class RecapPipelineManager(private val context: Context) {
     }
 
     /**
-     * Phase 2: Renders final video using the user's live-tuned subtitle layout and blur watermark box.
+     * Phase 2: Renders final video using watermark blur box and audio mastering.
      */
     suspend fun generateFinalVideo(
         soundStyle: String = "cinematic_recap",
-        burnSubtitles: Boolean = true,
+        burnSubtitles: Boolean = false,
         subtitlePlacement: String = "bottom",
         fontScale: Float = 1.0f,
         marginV: Int = 30,
@@ -299,34 +297,17 @@ class RecapPipelineManager(private val context: Context) {
 
         try {
             val finalVideo = File(workDir, "final_recap.mp4")
-            val assSubtitles = File(workDir, "subtitles.ass")
 
-            // Subtitle Generation (.ass)
-            val fontsDir = File(context.filesDir, "fonts").apply { mkdirs() }
-            ensurePadaukFont(fontsDir)
-            val (vidW, vidH) = ffmpegEngine.getVideoDimensions(sourceVideo)
-            val assFileToUse: File? = if (burnSubtitles && !burmeseTranscript.isNullOrBlank()) {
-                SubtitleGenerator.generateAssFile(
-                    transcriptJson = burmeseTranscript,
-                    outputAssFile = assSubtitles,
-                    videoWidth = vidW,
-                    videoHeight = vidH,
-                    placement = subtitlePlacement,
-                    fontScale = fontScale,
-                    marginV = marginV
-                )
-            } else null
-
-            // Video Composition with FFmpegKit
-            log("🎬 Composing final recap video with live subtitle & watermark blur settings...", PipelineStage.COMPOSING_VIDEO, 0.92f)
+            // Video Composition with FFmpegKit (Subtitles removed)
+            log("🎬 Composing final recap video with watermark blur & audio mastering...", PipelineStage.COMPOSING_VIDEO, 0.92f)
             ffmpegEngine.renderFinalRecap(
                 sourceVideo = sourceVideo,
                 dubbedVoiceAudio = voiceAudio,
-                assSubtitleFile = assFileToUse,
+                assSubtitleFile = null,
                 outputVideo = finalVideo,
                 playbackSpeed = playbackSpeed,
                 blurBox = blurBox,
-                fontsDir = fontsDir,
+                fontsDir = null,
                 soundStyle = soundStyle,
                 onProgress = { pct, msg ->
                     val overallProgress = 0.92f + (pct * 0.06f)
@@ -374,7 +355,7 @@ class RecapPipelineManager(private val context: Context) {
         voiceProfile: VoiceProfile = VoiceProfiles.defaultProfile(),
         dubbingMode: String = "DIALOGUE_SYNC",
         soundStyle: String = "cinematic_recap",
-        burnSubtitles: Boolean = true,
+        burnSubtitles: Boolean = false,
         subtitlePlacement: String = "bottom",
         fontScale: Float = 1.0f,
         marginV: Int = 30,

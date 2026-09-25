@@ -221,7 +221,7 @@ data class PipelineParams(
     val voicePitch: String = "+0Hz",
     val voicePrompt: String = "",
     val soundStyle: String = "cinematic_recap",
-    val burnSubtitles: Boolean = true,
+    val burnSubtitles: Boolean = false,
     val subPlacement: String = "bottom",
     val fontScale: Float = 1.0f,
     val marginV: Int = 30,

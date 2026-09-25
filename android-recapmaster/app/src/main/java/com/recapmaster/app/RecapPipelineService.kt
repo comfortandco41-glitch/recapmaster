@@ -73,7 +73,7 @@ class RecapPipelineService : Service() {
             pitch: String = "+0Hz",
             voicePrompt: String = "",
             soundStyle: String = "cinematic_recap",
-            burnSubtitles: Boolean = true,
+            burnSubtitles: Boolean = false,
             subPlacement: String = "bottom",
             fontScale: Float = 1.0f,
             marginV: Int = 30,
@@ -144,7 +144,7 @@ class RecapPipelineService : Service() {
                 val pitch         = intent.getStringExtra(EXTRA_VOICE_PITCH) ?: "+0Hz"
                 val promptPersona = intent.getStringExtra(EXTRA_VOICE_PROMPT) ?: ""
                 val soundStyle    = intent.getStringExtra(EXTRA_SOUND_STYLE) ?: "cinematic_recap"
-                val burnSubs      = intent.getBooleanExtra(EXTRA_BURN_SUBS, true)
+                val burnSubs      = intent.getBooleanExtra(EXTRA_BURN_SUBS, false)
                 val subPlacement  = intent.getStringExtra(EXTRA_SUB_PLACEMENT) ?: "bottom"
                 val fontScale     = intent.getFloatExtra(EXTRA_FONT_SCALE, 1.0f)
                 val marginV       = intent.getIntExtra(EXTRA_MARGIN_V, 30)

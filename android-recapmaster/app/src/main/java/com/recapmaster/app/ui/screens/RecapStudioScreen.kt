@@ -152,11 +152,6 @@ fun RecapStudioScreen(
     var soundStyleExpanded by remember { mutableStateOf(false) }
     var soundStyle     by remember { mutableStateOf(SOUND_STYLES[0]) }
 
-    // Subtitle
-    var burnSubtitles  by remember { mutableStateOf(true) }
-    var subtitlePlacement by remember { mutableStateOf("bottom") }
-    var fontScale      by remember { mutableFloatStateOf(1.0f) }
-    var marginV        by remember { mutableIntStateOf(30) }
 
     // Blur box
     var blurEnabled    by remember { mutableStateOf(false) }
@@ -582,12 +577,12 @@ fun RecapStudioScreen(
             // ── Step 2: Post-Dubbing Interactive Live Studio (Subtitles & Watermark Blur) ──
             AnimatedVisibility(visible = isDubbedReady || isComposing || isCompleted) {
                 StudioCard(
-                    title = "2. Live Studio: Subtitles & Watermark Tuning (Live Preview)",
+                    title = "2. Live Studio: Watermark & Video Tuning (Live Preview)",
                     icon = Icons.Default.Preview,
                     accentColor = Cyan
                 ) {
                     Text(
-                        "Video & voice are dubbed! Adjust your subtitle layout and logo blur box in real-time on the video preview below before generating the final video.",
+                        "Video & voice are dubbed! Adjust your watermark blur box and playback speed in real-time on the video preview below before generating the final video.",
                         fontSize = 11.sp,
                         color = TextSecondary
                     )
@@ -640,107 +635,6 @@ fun RecapStudioScreen(
                                     )
                                 }
                             }
-                        }
-
-                        // Real-time Subtitle Overlay
-                        if (burnSubtitles) {
-                            BoxWithConstraints(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 14.dp)
-                            ) {
-                                val vOffset = when (subtitlePlacement) {
-                                    "top" -> (marginV * 0.45f).dp
-                                    "bottom" -> (-marginV * 0.45f).dp
-                                    else -> 0.dp
-                                }
-                                val alignment = when (subtitlePlacement) {
-                                    "top" -> Alignment.TopCenter
-                                    "middle" -> Alignment.Center
-                                    else -> Alignment.BottomCenter
-                                }
-
-                                Surface(
-                                    modifier = Modifier
-                                        .align(alignment)
-                                        .offset(y = vOffset),
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = Color.Black.copy(alpha = 0.8f)
-                                ) {
-                                    Text(
-                                        text = pipelineState.previewSubtitleText.ifBlank {
-                                            "မင်္ဂလာပါ... ရုပ်ရှင်ဇာတ်လမ်း ပြန်လည်ပြောပြချက် နမူနာစာတန်း"
-                                        },
-                                        color = Color.Yellow,
-                                        fontSize = (12 * fontScale).sp,
-                                        fontWeight = FontWeight.Bold,
-                                        textAlign = TextAlign.Center,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = Border)
-
-                    // ── Subtitle Tuning Section ──
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Burn Burmese Subtitles", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                            Text("Render Padauk font with HarfBuzz OpenType shaping", fontSize = 10.sp, color = TextMuted)
-                        }
-                        Switch(
-                            checked = burnSubtitles,
-                            onCheckedChange = { burnSubtitles = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Green)
-                        )
-                    }
-
-                    if (burnSubtitles) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            // Placement Chips
-                            Text("Subtitle Placement / Position", fontSize = 11.sp, color = TextSecondary)
-                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                listOf("bottom" to "Bottom (အောက်)", "top" to "Top (အပေါ်)", "middle" to "Middle (အလယ်)").forEach { (value, label) ->
-                                    FilterChip(
-                                        selected = subtitlePlacement == value,
-                                        onClick = { subtitlePlacement = value },
-                                        label = { Text(label, fontSize = 11.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green, selectedLabelColor = Color.Black)
-                                    )
-                                }
-                            }
-
-                            // Font Scale Slider
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Font Size Scale", fontSize = 11.sp, color = TextSecondary)
-                                Text(String.format("%.2f×", fontScale), fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
-                            }
-                            Slider(
-                                value = fontScale,
-                                onValueChange = { fontScale = it },
-                                valueRange = 0.7f..1.6f,
-                                steps = 17,
-                                colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
-                            )
-
-                            // Margin V Slider
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Vertical Edge Margin", fontSize = 11.sp, color = TextSecondary)
-                                Text("${marginV}px", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
-                            }
-                            Slider(
-                                value = marginV.toFloat(),
-                                onValueChange = { marginV = it.toInt() },
-                                valueRange = 10f..120f,
-                                steps = 21,
-                                colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
-                            )
                         }
                     }
 
@@ -890,10 +784,7 @@ fun RecapStudioScreen(
                                     PipelineParams(
                                         action        = "COMPOSE",
                                         soundStyle    = soundStyle.value,
-                                        burnSubtitles = burnSubtitles,
-                                        subPlacement  = subtitlePlacement,
-                                        fontScale     = fontScale,
-                                        marginV       = marginV,
+                                        burnSubtitles = false,
                                         speed         = playbackSpeed,
                                         blurEnabled   = blurEnabled,
                                         blurX         = blurX, blurY = blurY,
