@@ -168,10 +168,10 @@ class RecapPipelineManager(private val context: Context) {
             log("✅ Translation complete", progress = 0.65f, stageProgress = 1.0f)
 
             val dialogueSegments = parseDialogueSegments(burmeseTranscript)
-            // Merge close micro-fragments (< 0.45s apart) for exact SRT sync to avoid split sentence chopping
-            val srtSegments = mergeCloseDialogueSegments(dialogueSegments, minGapSeconds = 0.45)
-            // Merge scene pauses (< 0.85s apart) for scene flow
-            val mergedSegments = mergeCloseDialogueSegments(dialogueSegments, minGapSeconds = 0.85)
+            // For Exact SRT Sync: 1:1 original timestamps (only merge micro-split fragments < 0.10s)
+            val srtSegments = mergeCloseDialogueSegments(dialogueSegments, minGapSeconds = 0.10)
+            // For Scene Flow: only merge tightly connected utterances (< 0.20s pause) so scene cuts are never bridged
+            val mergedSegments = mergeCloseDialogueSegments(dialogueSegments, minGapSeconds = 0.20)
 
             // Stage 5: Voice Dubbing (Exact SRT Sync vs Scene Flow vs Story Recap)
             if (dubbingMode == "EXACT_SRT_SYNC" && dialogueSegments.isNotEmpty()) {
@@ -464,21 +464,13 @@ class RecapPipelineManager(private val context: Context) {
 
         for (i in 0 until totalSegments) {
             val seg = segments[i]
+            val targetStart = seg.start
             val nextStart = if (i + 1 < totalSegments) segments[i + 1].start else videoDuration
-            val targetSceneWindow = (seg.end - seg.start).coerceAtLeast(0.5)
-            // Available time before next dialogue starts (ensures no overlapping between characters)
-            val maxAvailableWindow = kotlin.math.max(targetSceneWindow, (nextStart - seg.start).coerceAtLeast(targetSceneWindow))
 
-            // 1. Dynamic Shift: If previous speech ran past seg.start, gracefully shift
-            // the start time with a natural 180ms conversational pause so lines never collide
-            val scheduledStart = if (currentTimeline > 0.0) {
-                kotlin.math.max(seg.start, currentTimeline + 0.18)
-            } else {
-                seg.start
-            }
-
-            val preGap = scheduledStart - currentTimeline
-            if (preGap > 0.02) {
+            // 1. Frame-Accurate Absolute Anchor:
+            // Pad silence from currentTimeline up to targetStart so this scene starts at its exact video second
+            val preGap = targetStart - currentTimeline
+            if (preGap > 0.005) {
                 val silenceFile = File(segmentsDir, "silence_${i}.wav")
                 ffmpegEngine.writeSilenceWav(silenceFile, preGap)
                 listEntries.add("file '${silenceFile.absolutePath}'")
@@ -491,7 +483,7 @@ class RecapPipelineManager(private val context: Context) {
 
             val stepStagePct = (i + 1).toFloat() / totalSegments
             val stepOverallProg = 0.68f + (stepStagePct * 0.14f)
-            val sceneTimestamp = String.format(java.util.Locale.US, "%.1fs", seg.start)
+            val sceneTimestamp = String.format(java.util.Locale.US, "%.1fs", targetStart)
             onProgress(stepOverallProg, stepStagePct, "🎙️ Dubbing dialogue scene ${i + 1}/$totalSegments at $sceneTimestamp (${(stepStagePct * 100).toInt()}%)...")
 
             if (voiceProfile.isGemini || voiceProfile.isGoogleCloud) {
@@ -516,15 +508,11 @@ class RecapPipelineManager(private val context: Context) {
                 )
             }
 
-            // 3. Measure duration and apply natural tempo fitting (max 1.15x) if Burmese speech exceeds scene window
-            val rawDur = ffmpegEngine.getMediaDurationSeconds(rawClip)
-            val speedFactor = if (rawDur > targetSceneWindow * 1.10 && targetSceneWindow > 0.4) {
-                (rawDur / targetSceneWindow).toFloat().coerceIn(1.0f, 1.15f)
-            } else {
-                1.0f
-            }
-
-            ffmpegEngine.fitSegmentAudio(rawClip, fittedWav, speedFactor)
+            // 3. Strict Ceiling Fit:
+            // Available window before the NEXT scene cut (with 100ms conversational safety gap)
+            // This guarantees previous narration NEVER speaks over the new scene!
+            val availableSceneWindow = kotlin.math.max(0.3, (nextStart - targetStart) - 0.10)
+            ffmpegEngine.fitSegmentWithCeiling(rawClip, fittedWav, maxDurationSeconds = availableSceneWindow)
             val finalPartDur = ffmpegEngine.getMediaDurationSeconds(fittedWav)
 
             listEntries.add("file '${fittedWav.absolutePath}'")
@@ -564,18 +552,12 @@ class RecapPipelineManager(private val context: Context) {
 
         for (i in 0 until totalSegments) {
             val seg = segments[i]
-            val targetDur = (seg.end - seg.start).coerceAtLeast(0.3)
+            val targetStart = seg.start
+            val targetDur = (seg.end - seg.start).coerceAtLeast(0.25)
 
-            // 1. Dynamic Shift: If previous line's speech ran past this segment's start,
-            // gracefully shift the next line back with a natural 180ms breathing pause so voices never collide.
-            val scheduledStart = if (currentTimeline > 0.0) {
-                kotlin.math.max(seg.start, currentTimeline + 0.18)
-            } else {
-                seg.start
-            }
-
-            val preGap = scheduledStart - currentTimeline
-            if (preGap > 0.02) {
+            // 1. Frame-Accurate Absolute Anchor:
+            val preGap = targetStart - currentTimeline
+            if (preGap > 0.005) {
                 val silenceFile = File(segmentsDir, "silence_${i}.wav")
                 ffmpegEngine.writeSilenceWav(silenceFile, preGap)
                 listEntries.add("file '${silenceFile.absolutePath}'")
@@ -613,7 +595,7 @@ class RecapPipelineManager(private val context: Context) {
                 )
             }
 
-            // 3. Time-warp and pad/trim so this audio segment matches targetDur of original video SRT 100% exactly
+            // 3. Time-warp and pad/trim to EXACT targetDur (hard-limited, zero duration leak)
             ffmpegEngine.fitSegmentExactDuration(rawClip, exactWav, targetDur)
             val finalPartDur = ffmpegEngine.getMediaDurationSeconds(exactWav)
 

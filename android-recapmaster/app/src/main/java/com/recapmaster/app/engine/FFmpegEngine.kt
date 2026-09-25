@@ -202,9 +202,58 @@ class FFmpegEngine(private val context: Context) {
     }
 
     /**
-     * Preserves natural 100% human speech speed. Never slows down below 1.0x (avoids robot drag),
-     * gently accelerates by at most 1.15x if slightly longer, and pads with natural silence if shorter.
-     * Never abruptly cuts off spoken words.
+     * Accurately fits a speech segment within maxDurationSeconds:
+     * 1. If speech is longer than maxDuration, uses atempo (up to 1.30x) to fit naturally.
+     * 2. If speech is still slightly longer than maxDuration, applies a clean 50ms audio fade-out
+     *    and trims strictly at maxDuration so narration NEVER spills into the next scene.
+     * 3. Guarantees output duration is <= maxDurationSeconds.
+     */
+    suspend fun fitSegmentWithCeiling(
+        inputAudio: File,
+        outputWav: File,
+        maxDurationSeconds: Double
+    ): File = withContext(Dispatchers.IO) {
+        outputWav.parentFile?.mkdirs()
+        val rawDur = getMediaDurationSeconds(inputAudio)
+        val maxDur = maxDurationSeconds.coerceAtLeast(0.25)
+
+        val speed = if (rawDur > maxDur) {
+            (rawDur / maxDur).toFloat().coerceIn(1.0f, 1.30f)
+        } else {
+            1.0f
+        }
+
+        val effectiveDur = if (speed > 1.01f) rawDur / speed else rawDur
+        val atempoStr = if (kotlin.math.abs(speed - 1.0f) > 0.02f) {
+            String.format(java.util.Locale.US, "atempo=%.4f", speed)
+        } else {
+            ""
+        }
+
+        // If after 1.30x speedup it still exceeds maxDur, trim with a 50ms fade-out so words don't click
+        val filterStr = if (effectiveDur > maxDur + 0.05) {
+            val fadeStart = (maxDur - 0.06).coerceAtLeast(0.1)
+            val trimFilter = String.format(java.util.Locale.US, "afade=t=out:st=%.3f:d=0.05,atrim=end=%.3f", fadeStart, maxDur)
+            if (atempoStr.isNotBlank()) "$atempoStr,$trimFilter" else trimFilter
+        } else {
+            atempoStr
+        }
+
+        val filterArg = if (filterStr.isNotBlank()) "-filter:a \"$filterStr\"" else ""
+        val targetLimit = String.format(java.util.Locale.US, "-t %.3f", maxDur)
+        val cmd = "-y -i \"${inputAudio.absolutePath}\" $filterArg $targetLimit -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
+        executeFfmpeg(cmd)
+        if (!outputWav.exists() || outputWav.length() == 0L) {
+            throw RuntimeException("Audio ceiling fit failed for ${inputAudio.name}")
+        }
+        outputWav
+    }
+
+    /**
+     * Preserves natural speech speed with 1:1 exact frame synchronization:
+     * - Uses atempo (up to 1.30x) if speech is longer than targetDur.
+     * - Pads with silence up to targetDur if shorter.
+     * - Hard-limits output to exactly targetDurationSeconds so no cumulative drift occurs.
      */
     suspend fun fitSegmentExactDuration(
         inputAudio: File,
@@ -213,24 +262,33 @@ class FFmpegEngine(private val context: Context) {
     ): File = withContext(Dispatchers.IO) {
         outputWav.parentFile?.mkdirs()
         val rawDur = getMediaDurationSeconds(inputAudio)
-        val targetDur = targetDurationSeconds.coerceAtLeast(0.2)
+        val targetDur = targetDurationSeconds.coerceAtLeast(0.25)
 
-        // Rule 1: Never slow down below 1.0x (prevents sluggish/dragging robot voice).
-        // Rule 2: If speech is longer than targetDur, only gently accelerate up to 1.15x (imperceptible natural tempo).
-        val speed = if (rawDur > targetDur && targetDur > 0.1) {
-            (rawDur / targetDur).toFloat().coerceIn(1.0f, 1.15f)
+        val speed = if (rawDur > targetDur) {
+            (rawDur / targetDur).toFloat().coerceIn(1.0f, 1.30f)
         } else {
             1.0f
         }
 
         val effectiveDur = if (speed > 1.01f) rawDur / speed else rawDur
-        // If the speech is shorter than targetDur, pad with silence up to targetDur
-        // If it is slightly longer (after 1.15x tempo), allow it to finish fully without truncation
-        val padTarget = kotlin.math.max(targetDur, effectiveDur)
-        val atempoStr = String.format(java.util.Locale.US, "atempo=%.4f", speed)
-        val padStr = String.format(java.util.Locale.US, "apad=whole_dur=%.3f", padTarget)
+        val atempoStr = if (kotlin.math.abs(speed - 1.0f) > 0.02f) {
+            String.format(java.util.Locale.US, "atempo=%.4f", speed)
+        } else {
+            ""
+        }
 
-        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$atempoStr,$padStr\" -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
+        val filterStr = if (effectiveDur < targetDur) {
+            val padStr = String.format(java.util.Locale.US, "apad=whole_dur=%.3f", targetDur)
+            if (atempoStr.isNotBlank()) "$atempoStr,$padStr" else padStr
+        } else if (effectiveDur > targetDur + 0.05) {
+            val fadeStart = (targetDur - 0.06).coerceAtLeast(0.1)
+            val trimStr = String.format(java.util.Locale.US, "afade=t=out:st=%.3f:d=0.05,atrim=end=%.3f", fadeStart, targetDur)
+            if (atempoStr.isNotBlank()) "$atempoStr,$trimStr" else trimStr
+        } else {
+            if (atempoStr.isNotBlank()) atempoStr else "anull"
+        }
+
+        val cmd = "-y -i \"${inputAudio.absolutePath}\" -filter:a \"$filterStr\" -t ${String.format(java.util.Locale.US, "%.3f", targetDur)} -ar 24000 -ac 1 \"${outputWav.absolutePath}\""
         executeFfmpeg(cmd)
         if (!outputWav.exists() || outputWav.length() == 0L) {
             throw RuntimeException("Exact duration audio fit failed for ${inputAudio.name}")
@@ -339,16 +397,8 @@ class FFmpegEngine(private val context: Context) {
         val audDur = getMediaDurationSeconds(dubbedVoiceAudio)
         val targetVideoDur = if (vidDur > 0) vidDur / speed else 0.0
 
-        // If audio duration is moderately shorter than video duration, gently stretch tempo so narration spans the whole video
-        val stretchFactor = if (targetVideoDur > 1.0 && audDur > 1.0 && audDur < targetVideoDur) {
-            val ratio = (audDur / targetVideoDur).toFloat()
-            if (ratio in 0.70f..0.98f) ratio.coerceIn(0.75f, 1.0f) else 1.0f
-        } else {
-            1.0f
-        }
-
-        val effectiveAudioSpeed = speed * stretchFactor
-        val effectiveHasSpeed = hasSpeed || kotlin.math.abs(effectiveAudioSpeed - 1.0f) > 0.01f
+        val effectiveAudioSpeed = speed
+        val effectiveHasSpeed = hasSpeed
 
         // Build atempo chain (handles speeds outside 0.5–2.0 range by chaining)
         val atempoStr: String = when {

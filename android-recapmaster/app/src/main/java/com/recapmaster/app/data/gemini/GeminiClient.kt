@@ -98,24 +98,36 @@ class GeminiClient(private val apiKey: String) {
     private fun translateBatch(batch: List<JSONObject>): String {
         val segmentsArr = JSONArray()
         for (item in batch) {
-            segmentsArr.put(item)
+            val start = item.optDouble("start", 0.0)
+            val end = item.optDouble("end", start + 2.0)
+            val durSec = (end - start).coerceAtLeast(0.3)
+            val maxWords = (durSec * 1.5).toInt().coerceIn(2, 25)
+
+            val enriched = JSONObject().apply {
+                put("id", item.opt("id") ?: 0)
+                put("start", start)
+                put("end", end)
+                put("scene_seconds", String.format(java.util.Locale.US, "%.1fs", durSec))
+                put("max_burmese_words", maxWords)
+                put("text", item.optString("text", ""))
+            }
+            segmentsArr.put(enriched)
         }
         val batchJson = JSONObject().apply {
             put("segments", segmentsArr)
         }.toString()
 
         val prompt = """
-You are an award-winning movie dubbing translator specializing in natural, concise, lip-synced Burmese (မြန်မာဘာသာ ဒါဘင်ပြန်ဆိုသူ).
+You are an award-winning professional movie dubbing translator specializing in natural, concise, lip-synced Burmese (မြန်မာဘာသာ ဒါဘင်ပြန်ဆိုသူ).
 Translate the following dialogue transcript segments into natural spoken Burmese.
 
-CRITICAL DURATION & CONCISE TIMING CONSTRAINTS:
+CRITICAL DURATION & SCENE SYNCHRONIZATION CONSTRAINTS:
 1. Preserve EXACT timestamps ("start" and "end" in seconds) and the JSON structure.
-2. In movie dubbing, the spoken Burmese length MUST strictly fit the original dialogue scene duration (duration = end - start seconds).
-3. Burmese speech rate is ~1.8 words (approx 3.5 to 4 syllables) per second.
-   - For every segment, calculate max allowed words = max(2, ((end - start) * 1.8).toInt()).
-   - STRICT RULE: Do NOT write long or wordy Burmese sentences! If the original scene is 1.5 seconds, use AT MOST 3-4 words.
-   - For short scenes (1-2s): Be punchy, direct, and colloquial. No formal filler words.
-   - For medium scenes (3-5s): Keep sentences tight and concise so the voice speaks at a natural, comfortable tempo without having to rush or drag.
+2. In movie dubbing, the spoken Burmese length MUST strictly fit the original dialogue scene duration.
+3. For each segment, observe its `scene_seconds` and `max_burmese_words`:
+   - STRICT RULE: Your Burmese translation MUST NOT exceed `max_burmese_words`!
+   - If a scene is short (1-2s): Be punchy, direct, and colloquial (AT MOST 2-4 words). No formal filler words.
+   - If a Burmese sentence is too long, the voice will overrun into the next video scene, destroying audio-visual sync!
 4. Output ONLY valid JSON in this exact structure without markdown or backticks:
 {"segments": [{"start": 0.0, "end": 4.0, "text": "မြန်မာစကားပြော ပြန်ဆိုချက်"}]}
 
