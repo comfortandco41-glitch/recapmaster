@@ -58,13 +58,23 @@ class MainActivity : ComponentActivity() {
                 color = Color(0xFF09090B)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
+                    // 📱 Top Unity Banner Ad (BP_Banner_Android)
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        factory = {
+                            com.recapmaster.app.ads.UnityAdsManager.createBannerView(this@MainActivity)
+                        }
+                    )
+
                     Box(modifier = Modifier.weight(1f)) {
                         RecapStudioScreen(
                             pipelineManager = pipelineManager,
                             onStartPipeline = { params -> startPipelineSafely(params) }
                         )
                     }
-                    // 📱 Unity Banner Ad (BP_Banner_Android)
+                    // 📱 Bottom Unity Banner Ad (BP_Banner_Android)
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
