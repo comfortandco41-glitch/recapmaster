@@ -45,6 +45,33 @@ data class UserSubscription(
             return if (diff > 0) (diff / (60 * 60 * 1000L)) % 24 else 0L
         }
 
+    val totalRemainingMinutes: Long
+        get() {
+            if (isAdmin) return 999999L
+            val diff = expiresAtMs - System.currentTimeMillis()
+            return if (diff > 0) diff / (60 * 1000L) else 0L
+        }
+
+    val remainingSeconds: Long
+        get() {
+            if (isAdmin) return 999999L
+            val diff = expiresAtMs - System.currentTimeMillis()
+            return if (diff > 0) (diff / 1000L) % 60 else 0L
+        }
+
+    val formattedRemainingTime: String
+        get() {
+            if (isAdmin) return "Admin (Unlimited)"
+            if (isExpired) return "Expired (ကြော်ငြာကြည့်ရန် လိုအပ်သည်)"
+            val mins = totalRemainingMinutes
+            val secs = remainingSeconds
+            return if (mins > 60) {
+                "${mins / 60}h ${mins % 60}m"
+            } else {
+                "${mins}m ${secs}s"
+            }
+        }
+
     val formattedExpiry: String
         get() {
             if (isAdmin) return "Admin (Unlimited)"
@@ -72,9 +99,7 @@ object UserSubscriptionManager {
 
     /**
      * Called whenever Firebase Auth state changes.
-     * Attaches a real-time Firestore listener to users/{uid} to automatically
-     * grant 7 days to new users, track expiration, and react immediately when an
-     * admin extends the date in Firebase Console.
+     * All new users start with 0 minutes and must watch a video ad (1 watch = 20 mins free use).
      */
     fun onUserChanged(user: FirebaseUser?) {
         snapshotListener?.remove()
@@ -100,11 +125,10 @@ object UserSubscriptionManager {
             }
 
             if (snapshot == null || !snapshot.exists()) {
-                // New user! Grant 7 days unlimited access
+                // New user: No 7-day trial. Must watch ads (1 watch = 20 mins free use)
                 val now = System.currentTimeMillis()
-                val sevenDaysMs = 7L * 24 * 60 * 60 * 1000L
-                val expiresAt = now + sevenDaysMs
-                val dateStr = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date(expiresAt))
+                val expiresAt = now // Expired by default
+                val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(expiresAt))
 
                 val initialData = hashMapOf(
                     "uid" to user.uid,
@@ -112,13 +136,13 @@ object UserSubscriptionManager {
                     "displayName" to (user.displayName ?: ""),
                     "createdAtMs" to now,
                     "expiresAtMs" to expiresAt,
-                    "expiresAt" to Timestamp(Date(expiresAt)), // Firebase Timestamp gives a Calendar Date Picker in Console!
-                    "expiryDate" to dateStr, // Human readable: "2026-10-02"
-                    "extendDays" to 0, // Admin can easily type 30 to add 30 days
-                    "status" to "active",
-                    "isUnlimited" to true,
+                    "expiresAt" to Timestamp(Date(expiresAt)),
+                    "expiryDate" to dateStr,
+                    "extendDays" to 0,
+                    "status" to "expired",
+                    "isUnlimited" to false,
                     "isAdmin" to false,
-                    "note" to "New user 7-day trial"
+                    "note" to "New user (Ad-supported: 1 ad = 20 mins)"
                 )
 
                 docRef.set(initialData).addOnSuccessListener {
@@ -128,10 +152,10 @@ object UserSubscriptionManager {
                         displayName = user.displayName ?: "",
                         createdAtMs = now,
                         expiresAtMs = expiresAt,
-                        status = "active",
-                        isUnlimited = true,
+                        status = "expired",
+                        isUnlimited = false,
                         isAdmin = false,
-                        note = "New user 7-day trial"
+                        note = "New user (Ad-supported: 1 ad = 20 mins)"
                     )
                     _subscription.value = sub
                     saveToCache(sub)
@@ -259,20 +283,22 @@ object UserSubscriptionManager {
 
     /**
      * Called when user finishes watching a Rewarded Ad.
-     * Extends expiration time by [hours] (default 24h) from now (or from current expiration if still active).
+     * Grants [minutes] (default 20 mins free use).
+     * If already active, it stacks on top of remaining time.
      */
-    fun grantAdRewardHours(user: FirebaseUser?, hours: Long = 24, onComplete: ((Boolean) -> Unit)? = null) {
+    fun grantAdRewardMinutes(user: FirebaseUser?, minutes: Long = 20, onComplete: ((Boolean) -> Unit)? = null) {
         if (user == null) {
             onComplete?.invoke(false)
             return
         }
         val currentSub = _subscription.value
-        val baseTime = if (currentSub != null && !currentSub.isExpired) {
+        val now = System.currentTimeMillis()
+        val baseTime = if (currentSub != null && !currentSub.isExpired && currentSub.expiresAtMs > now) {
             currentSub.expiresAtMs
         } else {
-            System.currentTimeMillis()
+            now
         }
-        val newExpiry = baseTime + (hours * 60 * 60 * 1000L)
+        val newExpiry = baseTime + (minutes * 60 * 1000L)
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(newExpiry))
 
         val updates = hashMapOf<String, Any>(
@@ -296,5 +322,9 @@ object UserSubscriptionManager {
             .addOnFailureListener {
                 onComplete?.invoke(false)
             }
+    }
+
+    fun grantAdRewardHours(user: FirebaseUser?, hours: Long = 24, onComplete: ((Boolean) -> Unit)? = null) {
+        grantAdRewardMinutes(user, hours * 60, onComplete)
     }
 }

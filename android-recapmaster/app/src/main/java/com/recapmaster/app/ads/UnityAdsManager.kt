@@ -13,29 +13,26 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 /**
- * UnityAdsManager handles initialization, preloading, and showing of Rewarded & Banner ads.
+ * UnityAdsManager handles initialization, preloading, and showing of Rewarded Ads.
  * Game ID: 800381519
- * Rewarded Placement: BP_Rewarded_Android
- * Banner Placement: BP_Banner_Android
+ * Placement: BP_Rewarded_Android
  */
 object UnityAdsManager {
     private const val TAG = "UnityAdsManager"
 
     const val GAME_ID = "800381519"
     const val REWARDED_PLACEMENT_ID = "BP_Rewarded_Android"
-    const val BANNER_PLACEMENT_ID = "BP_Banner_Android"
 
-    // Set to false for live production ads and revenue earnings.
-    var isTestMode: Boolean = false
+    // IMPORTANT: Keep true during development / testing APK builds.
+    // Unity requires test mode for unpublished APKs to prevent 100% NO_FILL errors.
+    var isTestMode: Boolean = true
 
     private var isInitialized = false
+    private var isCurrentlyLoading = false
 
     private val _isRewardedLoaded = MutableStateFlow(false)
     val isRewardedLoaded: StateFlow<Boolean> = _isRewardedLoaded.asStateFlow()
 
-    /**
-     * Call this in MainActivity.onCreate or Application.onCreate.
-     */
     fun initialize(context: Context, onComplete: (() -> Unit)? = null) {
         if (isInitialized) {
             onComplete?.invoke()
@@ -57,14 +54,16 @@ object UnityAdsManager {
         })
     }
 
-    /**
-     * Preloads the rewarded ad so it is ready instantaneously when the user clicks.
-     */
-    fun preloadRewardedAd(context: Context) {
+    fun preloadRewardedAd(context: Context, onLoaded: (() -> Unit)? = null) {
+        if (isCurrentlyLoading) return
+        isCurrentlyLoading = true
+
         UnityAds.load(REWARDED_PLACEMENT_ID, object : IUnityAdsLoadListener {
             override fun onUnityAdsAdLoaded(placementId: String?) {
                 Log.d(TAG, "Rewarded Ad successfully loaded: $placementId")
+                isCurrentlyLoading = false
                 _isRewardedLoaded.value = true
+                onLoaded?.invoke()
             }
 
             override fun onUnityAdsFailedToLoad(
@@ -73,18 +72,46 @@ object UnityAdsManager {
                 message: String?
             ) {
                 Log.w(TAG, "Failed to load Rewarded Ad: $error - $message")
+                isCurrentlyLoading = false
                 _isRewardedLoaded.value = false
             }
         })
     }
 
     /**
-     * Displays the rewarded ad.
-     * @param onUserRewarded Callback invoked ONLY when the user watches the entire ad.
-     * @param onDismissed Callback invoked if the user closes/skips the ad before completion.
-     * @param onFailed Callback invoked if the ad fails to show.
+     * Show Rewarded Ad safely.
+     * If the ad is not preloaded yet, it automatically loads it first and shows it as soon as ready!
      */
     fun showRewardedAd(
+        activity: Activity,
+        onStatusUpdate: ((String) -> Unit)? = null,
+        onUserRewarded: () -> Unit,
+        onDismissed: (() -> Unit)? = null,
+        onFailed: ((String) -> Unit)? = null
+    ) {
+        if (!isInitialized) {
+            onStatusUpdate?.invoke("⏳ Initializing Unity Ads SDK...")
+            initialize(activity.applicationContext) {
+                showRewardedAd(activity, onStatusUpdate, onUserRewarded, onDismissed, onFailed)
+            }
+            return
+        }
+
+        // If ad is ready in memory, show immediately
+        if (_isRewardedLoaded.value) {
+            performShow(activity, onUserRewarded, onDismissed, onFailed)
+        } else {
+            // Not ready yet: load on demand and show as soon as it arrives
+            onStatusUpdate?.invoke("⏳ Ad is buffering, please wait 3-5 seconds...")
+            preloadRewardedAd(activity.applicationContext) {
+                activity.runOnUiThread {
+                    performShow(activity, onUserRewarded, onDismissed, onFailed)
+                }
+            }
+        }
+    }
+
+    private fun performShow(
         activity: Activity,
         onUserRewarded: () -> Unit,
         onDismissed: (() -> Unit)? = null,
@@ -105,7 +132,6 @@ object UnityAdsManager {
             ) {
                 Log.d(TAG, "Rewarded Ad completed with state: $state")
                 _isRewardedLoaded.value = false
-                // Preload the next ad in the background
                 preloadRewardedAd(activity.applicationContext)
 
                 if (state == UnityAds.UnityAdsShowCompletionState.COMPLETED) {

@@ -529,40 +529,41 @@ fun RecapStudioScreen(
                             }
                         }
 
-                        // 🎬 Unity Rewarded Ad: Free 24h Pass
+                        // 🎬 Unity Rewarded Ad: Free 20-Minute Pass
                         Button(
                             onClick = {
                                 val activity = context as? android.app.Activity
                                 if (activity != null) {
-                                    authMessage = "⏳ Loading rewarded ad..."
+                                    authMessage = "⏳ Loading video ad..."
                                     com.recapmaster.app.ads.UnityAdsManager.showRewardedAd(
                                         activity = activity,
+                                        onStatusUpdate = { status -> authMessage = status },
                                         onUserRewarded = {
-                                            authMessage = "🎉 Ad complete! Adding 24 hours of free access..."
-                                            UserSubscriptionManager.grantAdRewardHours(currentUser, 24) { success ->
+                                            authMessage = "🎉 Ad complete! Adding 20 minutes of free access..."
+                                            UserSubscriptionManager.grantAdRewardMinutes(currentUser, 20) { success ->
                                                 authMessage = if (success) {
-                                                    "✅ Success! +24 Hours access granted. You can use RecapMaster now!"
+                                                    "✅ Success! +20 Minutes added. You can start recap generation now!"
                                                 } else {
                                                     "⚠️ Error updating time in Firestore. Please try again."
                                                 }
                                             }
                                         },
                                         onDismissed = {
-                                            authMessage = "⚠️ Ad closed before completion. Please watch the full video to unlock free access."
+                                            authMessage = "⚠️ Ad closed before completion. Please watch the full video to unlock 20 minutes."
                                         },
                                         onFailed = { err ->
-                                            authMessage = "⚠️ Ad failed to load: $err. Trying to preload next ad..."
+                                            authMessage = "⚠️ Ad error: $err"
                                         }
                                     )
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.Black),
                             shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.fillMaxWidth().height(40.dp)
+                            modifier = Modifier.fillMaxWidth().height(42.dp)
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("🎬 Watch Ad to Unlock +24 Hours Free (အခမဲ့ ၂၄ နာရီဖွင့်မည်)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("🎬 Watch Ad to Unlock +20 Mins (ကြော်ငြာကြည့်ပြီး ၂၀ မိနစ်ရယူပါ)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Refresh Status Button
@@ -578,13 +579,13 @@ fun RecapStudioScreen(
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp), tint = TextSecondary)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Refresh Status (သက်တမ်းတိုးပြီးပါက နှိပ်ပါ)", fontSize = 11.sp)
+                            Text("Refresh Status", fontSize = 11.sp)
                         }
                     }
                 }
             }
 
-            // ── 3. Active User: 7-Day Trial Status Banner ──────────────────
+            // ── 3. Active User: Time Remaining Status Banner ───────────────
             if (isUserLoggedIn && subscription != null && !isExpired) {
                 Surface(
                     shape = RoundedCornerShape(10.dp),
@@ -594,20 +595,55 @@ fun RecapStudioScreen(
                 ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Icon(
-                            if (subscription!!.isAdmin) Icons.Default.Shield else Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = Green,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Column {
-                            val titleText = if (subscription!!.isAdmin) "👑 Admin Account: Unlimited Access"
-                                else "⚡ 7-Day Unlimited Trial: ${subscription!!.remainingDays}d ${subscription!!.remainingHours}h remaining"
-                            Text(titleText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
-                            Text("Active until: ${subscription!!.formattedExpiry}", fontSize = 9.sp, color = TextMuted)
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
+                            Icon(
+                                if (subscription!!.isAdmin) Icons.Default.Shield else Icons.Default.CheckCircle,
+                                contentDescription = null,
+                                tint = Green,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                val titleText = if (subscription!!.isAdmin) "👑 Admin Account: Unlimited Access"
+                                    else "⏱️ Free Access: ${subscription!!.formattedRemainingTime} remaining"
+                                Text(titleText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
+                                Text("Expires: ${subscription!!.formattedExpiry}", fontSize = 9.sp, color = TextMuted)
+                            }
+                        }
+
+                        if (!subscription!!.isAdmin) {
+                            Button(
+                                onClick = {
+                                    val activity = context as? android.app.Activity
+                                    if (activity != null) {
+                                        authMessage = "⏳ Loading video ad..."
+                                        com.recapmaster.app.ads.UnityAdsManager.showRewardedAd(
+                                            activity = activity,
+                                            onStatusUpdate = { status -> authMessage = status },
+                                            onUserRewarded = {
+                                                UserSubscriptionManager.grantAdRewardMinutes(currentUser, 20) { success ->
+                                                    authMessage = if (success) "🎉 +20 Minutes added to your time!" else "⚠️ Error updating time."
+                                                }
+                                            },
+                                            onDismissed = {
+                                                authMessage = "⚠️ Ad closed before completion."
+                                            },
+                                            onFailed = { err ->
+                                                authMessage = "⚠️ Ad error: $err"
+                                            }
+                                        )
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.Black),
+                                shape = RoundedCornerShape(8.dp),
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                modifier = Modifier.height(28.dp)
+                            ) {
+                                Text("+20m (Ad)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
                     }
                 }
