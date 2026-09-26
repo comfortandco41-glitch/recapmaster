@@ -20,6 +20,13 @@ import com.recapmaster.app.ui.screens.RecapStudioScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
+
 class MainActivity : ComponentActivity() {
 
     private lateinit var pipelineManager: RecapPipelineManager
@@ -50,10 +57,23 @@ class MainActivity : ComponentActivity() {
                 modifier = Modifier.fillMaxSize(),
                 color = Color(0xFF09090B)
             ) {
-                RecapStudioScreen(
-                    pipelineManager = pipelineManager,
-                    onStartPipeline = { params -> startPipelineSafely(params) }
-                )
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Box(modifier = Modifier.weight(1f)) {
+                        RecapStudioScreen(
+                            pipelineManager = pipelineManager,
+                            onStartPipeline = { params -> startPipelineSafely(params) }
+                        )
+                    }
+                    // 📱 Unity Banner Ad (BP_Banner_Android)
+                    AndroidView(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(50.dp),
+                        factory = {
+                            com.recapmaster.app.ads.UnityAdsManager.createBannerView(this@MainActivity)
+                        }
+                    )
+                }
             }
         }
 

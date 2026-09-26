@@ -12,16 +12,21 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+import com.unity3d.services.banners.BannerView
+import com.unity3d.services.banners.UnityBannerSize
+import com.unity3d.services.banners.BannerErrorInfo
+
 /**
- * UnityAdsManager handles initialization, preloading, and showing of Rewarded Ads.
+ * UnityAdsManager handles initialization, preloading, and showing of Rewarded & Banner Ads.
  * Game ID: 800381519
- * Placement: BP_Rewarded_Android
+ * Placement: BP_Rewarded_Android, BP_Banner_Android
  */
 object UnityAdsManager {
     private const val TAG = "UnityAdsManager"
 
     const val GAME_ID = "800381519"
     const val REWARDED_PLACEMENT_ID = "BP_Rewarded_Android"
+    const val BANNER_PLACEMENT_ID = "BP_Banner_Android"
 
     // IMPORTANT: Keep true during development / testing APK builds.
     // Unity requires test mode for unpublished APKs to prevent 100% NO_FILL errors.
@@ -152,5 +157,31 @@ object UnityAdsManager {
                 onFailed?.invoke(message ?: "Ad playback failed")
             }
         })
+    }
+
+    /**
+     * Creates and loads a 320x50 Banner ad view for the screen bottom.
+     */
+    fun createBannerView(activity: Activity): BannerView {
+        val banner = BannerView(activity, BANNER_PLACEMENT_ID, UnityBannerSize(320, 50))
+        banner.listener = object : BannerView.IListener {
+            override fun onBannerLoaded(bannerView: BannerView?) {
+                Log.d(TAG, "Banner ad loaded successfully: $BANNER_PLACEMENT_ID")
+            }
+
+            override fun onBannerFailedToLoad(bannerView: BannerView?, errorInfo: BannerErrorInfo?) {
+                Log.w(TAG, "Banner ad failed to load: ${errorInfo?.errorMessage}")
+            }
+
+            override fun onBannerClick(bannerView: BannerView?) {
+                Log.d(TAG, "Banner clicked")
+            }
+
+            override fun onBannerLeftApplication(bannerView: BannerView?) {
+                Log.d(TAG, "Banner left application")
+            }
+        }
+        banner.load()
+        return banner
     }
 }
