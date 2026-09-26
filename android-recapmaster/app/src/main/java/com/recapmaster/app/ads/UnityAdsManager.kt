@@ -173,6 +173,10 @@ object UnityAdsManager {
                 Log.w(TAG, "Banner ad failed to load: ${errorInfo?.errorMessage}")
             }
 
+            override fun onBannerShown(bannerView: BannerView?) {
+                Log.d(TAG, "Banner ad shown: $BANNER_PLACEMENT_ID")
+            }
+
             override fun onBannerClick(bannerView: BannerView?) {
                 Log.d(TAG, "Banner clicked")
             }
