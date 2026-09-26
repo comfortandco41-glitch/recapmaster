@@ -76,8 +76,8 @@ class GeminiTtsClient {
         voiceName: String,
         promptPersona: String
     ): ByteArray {
-        // Use gemini-3.6-flash model
-        val models = listOf("gemini-3.6-flash")
+        // Gemini models with native AUDIO response modality support
+        val models = listOf("gemini-2.0-flash", "gemini-2.0-flash-exp")
         var lastException: Exception? = null
 
         for (model in models) {
@@ -87,7 +87,7 @@ class GeminiTtsClient {
                 lastException = e
             }
         }
-        throw lastException ?: RuntimeException("Gemini Audio synthesis failed with gemini-3.6-flash")
+        throw lastException ?: RuntimeException("Gemini Audio synthesis failed across available models.")
     }
 
     private fun callGeminiAudioApi(
