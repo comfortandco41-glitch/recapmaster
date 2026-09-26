@@ -163,7 +163,7 @@ fun RecapStudioScreen(
     var customPitchSlider by remember { mutableFloatStateOf(-2f) }
     var customPersonaPrompt by remember { mutableStateOf("") }
     var showFineTune    by remember { mutableStateOf(false) }
-    var dubbingMode     by remember { mutableStateOf("EXACT_SRT_SYNC") } // "EXACT_SRT_SYNC" | "DIALOGUE_SYNC" | "STORY_RECAP"
+    var dubbingMode     by remember { mutableStateOf("STORY_RECAP") } // Dedicated Story Recap Mode
 
     // In-app voice audition state
     var isAuditioning   by remember { mutableStateOf(false) }
@@ -882,42 +882,41 @@ fun RecapStudioScreen(
 
                 HorizontalDivider(color = Border)
 
-                Text("Dubbing Timing & Scene Alignment Mode", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Dedicated Story Recap Dubbing Mode Banner
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = Purple.copy(alpha = 0.15f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Purple.copy(alpha = 0.45f)),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    FilterChip(
-                        selected = dubbingMode == "EXACT_SRT_SYNC",
-                        onClick = { dubbingMode = "EXACT_SRT_SYNC" },
-                        label = { Text("🎯 Exact SRT Sync", fontSize = 10.sp, fontWeight = if (dubbingMode == "EXACT_SRT_SYNC") FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Cyan, selectedLabelColor = Color.Black),
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = dubbingMode == "DIALOGUE_SYNC",
-                        onClick = { dubbingMode = "DIALOGUE_SYNC" },
-                        label = { Text("🎬 Scene Flow", fontSize = 10.sp, fontWeight = if (dubbingMode == "DIALOGUE_SYNC") FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Green, selectedLabelColor = Color.Black),
-                        modifier = Modifier.weight(1f)
-                    )
-                    FilterChip(
-                        selected = dubbingMode == "STORY_RECAP",
-                        onClick = { dubbingMode = "STORY_RECAP" },
-                        label = { Text("📖 Story Recap", fontSize = 10.sp, fontWeight = if (dubbingMode == "STORY_RECAP") FontWeight.Bold else FontWeight.Normal) },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Purple, selectedLabelColor = Color.White),
-                        modifier = Modifier.weight(1f)
-                    )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.MenuBook,
+                            contentDescription = null,
+                            tint = PurpleLight,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                "📖 Dubbing Mode: Movie Story Recap (ဇာတ်လမ်းပြန်ပြောခြင်း)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                "Gemini AI analyzes the entire video, writes a captivating Burmese movie recap story script, and narrates it from start to finish.",
+                                fontSize = 10.sp,
+                                color = TextSecondary,
+                                lineHeight = 14.sp
+                            )
+                        }
+                    }
                 }
-                Text(
-                    text = when (dubbingMode) {
-                        "EXACT_SRT_SYNC" -> "🎯 1:1 Exact SRT sync: Burmese audio is tempo-fitted to match the EXACT duration of each original dialogue line. Starts and ends at exact timestamps."
-                        "DIALOGUE_SYNC" -> "🎬 Scene Flow: Merges close utterances for natural conversational cadence while preserving scene pauses."
-                        else -> "📖 Story Recap: Continuous narrator story recap explaining the movie from start to end."
-                    },
-                    fontSize = 10.sp,
-                    color = TextMuted
-                )
 
             }
 
