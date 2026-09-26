@@ -318,7 +318,7 @@ fun RecapStudioScreen(
                                                 Spacer(modifier = Modifier.height(4.dp))
                                                 val statusText = if (subscription!!.isAdmin) "👑 Admin (Unlimited)"
                                                     else if (subscription!!.isExpired) "⛔ Access Expired"
-                                                    else "⚡ Trial: ${subscription!!.remainingDays}d ${subscription!!.remainingHours}h left"
+                                                    else "⚡ Time Left: ${subscription!!.formattedRemainingTime}"
                                                 val statusColor = if (subscription!!.isExpired) Red else Green
                                                 Text(statusText, fontSize = 10.sp, fontWeight = FontWeight.SemiBold, color = statusColor)
                                                 Text("Exp: ${subscription!!.formattedExpiry}", fontSize = 9.sp, color = TextMuted)
@@ -439,7 +439,7 @@ fun RecapStudioScreen(
                             color = TextPrimary
                         )
                         Text(
-                            "RecapMaster ကို အသုံးပြုရန် Google အကောင့်ဖြင့် ဝင်ရောက်ပေးပါ။ အကောင့်အသစ်တိုင်းအတွက် ၇ ရက် အကန့်အသတ်မရှိ (7 Days Unlimited Trial) အလိုအလျောက် ရရှိပါမည်။",
+                            "RecapMaster ကို အသုံးပြုရန် Google အကောင့်ဖြင့် ဝင်ရောက်ပေးပါ။ ကြော်ငြာ ၁ ခု ကြည့်ရုံဖြင့် ၁၀ မိနစ် အသုံးပြုခွင့် ရရှိပါမည် (1 Ad = 10 Mins Access)။",
                             fontSize = 11.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center
@@ -490,13 +490,13 @@ fun RecapStudioScreen(
                             modifier = Modifier.size(36.dp)
                         )
                         Text(
-                            "⏳ 7-Day Access Expired (၇ ရက် ကုန်ဆုံးသွားပါပြီ)",
+                            "⏳ Access Expired (အချိန်ကုန်ဆုံးသွားပါပြီ)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,
                             color = Red
                         )
                         Text(
-                            "သင့်အကောင့်၏ ၇ ရက် အခမဲ့အသုံးပြုခွင့်သည် ${subscription!!.formattedExpiry} တွင် ကုန်ဆုံးသွားပါပြီ။ ဆက်လက်အသုံးပြုနိုင်ရန် Admin ထံသို့ သင့် User ID (UID) ပေးပို့၍ သက်တမ်းတိုးခိုင်းပေးပါ။",
+                            "သင့်အကောင့်၏ အခမဲ့အသုံးပြုခွင့် ကုန်ဆုံးသွားပါပြီ။ ဆက်လက်အသုံးပြုရန် အောက်ပါ ခလုတ်ကို နှိပ်၍ ကြော်ငြာကြည့်ပြီး +၁၀ မိနစ် ရယူနိုင်ပါသည် (သို့မဟုတ် Admin ထံ သက်တမ်းတိုးခိုင်းနိုင်ပါသည်)။",
                             fontSize = 11.sp,
                             color = TextSecondary,
                             textAlign = TextAlign.Center
@@ -936,7 +936,7 @@ fun RecapStudioScreen(
                         return@Button
                     }
                     if (isExpired) {
-                        authMessage = "❌ Your 7-day access has expired. Please contact admin to extend your account."
+                        authMessage = "❌ Free access expired. Please watch an ad to get +10 minutes of free use."
                         return@Button
                     }
                     try {
@@ -974,7 +974,7 @@ fun RecapStudioScreen(
                 } else if (isExpired) {
                     Icon(Icons.Default.TimerOff, contentDescription = null, tint = Red)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("⛔ 7-Day Trial Expired (သက်တမ်းတိုးရန် လိုအပ်သည်)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text("⛔ Access Expired (ကြော်ငြာကြည့်ပြီး အချိန်ရယူပါ)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 } else {
                     Icon(Icons.Default.RecordVoiceOver, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
@@ -1371,7 +1371,7 @@ fun RecapStudioScreen(
                                 return@Button
                             }
                             if (isExpired) {
-                                authMessage = "❌ Your 7-day access has expired. Please contact admin to extend your account."
+                                authMessage = "❌ Free access expired. Please watch an ad to get +10 minutes of free use."
                                 return@Button
                             }
                             try {

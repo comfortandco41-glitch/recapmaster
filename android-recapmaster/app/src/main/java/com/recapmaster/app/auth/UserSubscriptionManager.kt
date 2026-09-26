@@ -181,10 +181,7 @@ object UserSubscriptionManager {
                         ?: snapshot.get("extendedUntil")
                 )
 
-                // Fallback if missing: 7 days from createdAt
-                if (expiresAtMs <= 0L && createdAtMs > 0L) {
-                    expiresAtMs = createdAtMs + (7L * 24 * 60 * 60 * 1000L)
-                }
+                // No free trial: if missing, expiresAtMs remains 0L (requires ad watch)
 
                 // If admin entered extendDays (e.g. 30), extend subscription by that many days
                 if (extendDays > 0) {
