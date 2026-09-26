@@ -256,4 +256,45 @@ object UserSubscriptionManager {
             onUserChanged(user)
         }
     }
+
+    /**
+     * Called when user finishes watching a Rewarded Ad.
+     * Extends expiration time by [hours] (default 24h) from now (or from current expiration if still active).
+     */
+    fun grantAdRewardHours(user: FirebaseUser?, hours: Long = 24, onComplete: ((Boolean) -> Unit)? = null) {
+        if (user == null) {
+            onComplete?.invoke(false)
+            return
+        }
+        val currentSub = _subscription.value
+        val baseTime = if (currentSub != null && !currentSub.isExpired) {
+            currentSub.expiresAtMs
+        } else {
+            System.currentTimeMillis()
+        }
+        val newExpiry = baseTime + (hours * 60 * 60 * 1000L)
+        val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(newExpiry))
+
+        val updates = hashMapOf<String, Any>(
+            "expiresAtMs" to newExpiry,
+            "expiresAt" to Timestamp(Date(newExpiry)),
+            "expiryDate" to dateStr,
+            "status" to "active"
+        )
+
+        firestore.collection("users").document(user.uid)
+            .update(updates)
+            .addOnSuccessListener {
+                val updatedSub = (currentSub ?: UserSubscription(uid = user.uid, email = user.email ?: "")).copy(
+                    expiresAtMs = newExpiry,
+                    status = "active"
+                )
+                _subscription.value = updatedSub
+                saveToCache(updatedSub)
+                onComplete?.invoke(true)
+            }
+            .addOnFailureListener {
+                onComplete?.invoke(false)
+            }
+    }
 }

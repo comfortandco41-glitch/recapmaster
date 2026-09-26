@@ -39,6 +39,9 @@ class MainActivity : ComponentActivity() {
         // Initialize user license & subscription manager
         com.recapmaster.app.auth.UserSubscriptionManager.init(applicationContext)
 
+        // Initialize Unity Ads SDK
+        com.recapmaster.app.ads.UnityAdsManager.initialize(applicationContext)
+
         // Request runtime permissions required on Android 13/14
         requestRuntimePermissions()
 

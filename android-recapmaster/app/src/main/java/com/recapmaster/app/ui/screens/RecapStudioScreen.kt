@@ -529,6 +529,42 @@ fun RecapStudioScreen(
                             }
                         }
 
+                        // 🎬 Unity Rewarded Ad: Free 24h Pass
+                        Button(
+                            onClick = {
+                                val activity = context as? android.app.Activity
+                                if (activity != null) {
+                                    authMessage = "⏳ Loading rewarded ad..."
+                                    com.recapmaster.app.ads.UnityAdsManager.showRewardedAd(
+                                        activity = activity,
+                                        onUserRewarded = {
+                                            authMessage = "🎉 Ad complete! Adding 24 hours of free access..."
+                                            UserSubscriptionManager.grantAdRewardHours(currentUser, 24) { success ->
+                                                authMessage = if (success) {
+                                                    "✅ Success! +24 Hours access granted. You can use RecapMaster now!"
+                                                } else {
+                                                    "⚠️ Error updating time in Firestore. Please try again."
+                                                }
+                                            }
+                                        },
+                                        onDismissed = {
+                                            authMessage = "⚠️ Ad closed before completion. Please watch the full video to unlock free access."
+                                        },
+                                        onFailed = { err ->
+                                            authMessage = "⚠️ Ad failed to load: $err. Trying to preload next ad..."
+                                        }
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.Black),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().height(40.dp)
+                        ) {
+                            Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text("🎬 Watch Ad to Unlock +24 Hours Free (အခမဲ့ ၂၄ နာရီဖွင့်မည်)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+
                         // Refresh Status Button
                         OutlinedButton(
                             onClick = {
