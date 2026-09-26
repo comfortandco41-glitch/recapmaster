@@ -535,7 +535,7 @@ fun RecapStudioScreen(
                             }
                         }
 
-                        // 🎬 Start.io Rewarded Ad: Free 20-Minute Pass
+                        // 🎬 Start.io Rewarded Ad: Free 10-Minute Pass
                         Button(
                             onClick = {
                                 val activity = context as? android.app.Activity
@@ -545,17 +545,17 @@ fun RecapStudioScreen(
                                         activity = activity,
                                         onStatusUpdate = { status -> authMessage = status },
                                         onUserRewarded = {
-                                            authMessage = "🎉 Ad complete! Adding 20 minutes of free access..."
-                                            UserSubscriptionManager.grantAdRewardMinutes(currentUser, 20) { success ->
+                                            authMessage = "🎉 Ad complete! Adding 10 minutes of free access..."
+                                            UserSubscriptionManager.grantAdRewardMinutes(currentUser, 10) { success ->
                                                 authMessage = if (success) {
-                                                    "✅ Success! +20 Minutes added. You can start recap generation now!"
+                                                    "✅ Success! +10 Minutes added. You can start recap generation now!"
                                                 } else {
                                                     "⚠️ Error updating time in Firestore. Please try again."
                                                 }
                                             }
                                         },
                                         onDismissed = {
-                                            authMessage = "⚠️ Ad closed before completion. Please watch the full video to unlock 20 minutes."
+                                            authMessage = "⚠️ Ad closed before completion. Please watch the full video to unlock 10 minutes."
                                         },
                                         onFailed = { err ->
                                             authMessage = "⚠️ Ad error: $err"
@@ -569,7 +569,7 @@ fun RecapStudioScreen(
                         ) {
                             Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(18.dp), tint = Color.Black)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("🎬 Watch Ad to Unlock +20 Mins (ကြော်ငြာကြည့်ပြီး ၂၀ မိနစ်ရယူပါ)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("🎬 Watch Ad to Unlock +10 Mins (ကြော်ငြာကြည့်ပြီး ၁၀ မိနစ်ရယူပါ)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
 
                         // Refresh Status Button
@@ -630,8 +630,8 @@ fun RecapStudioScreen(
                                             activity = activity,
                                             onStatusUpdate = { status -> authMessage = status },
                                             onUserRewarded = {
-                                                UserSubscriptionManager.grantAdRewardMinutes(currentUser, 20) { success ->
-                                                    authMessage = if (success) "🎉 +20 Minutes added to your time!" else "⚠️ Error updating time."
+                                                UserSubscriptionManager.grantAdRewardMinutes(currentUser, 10) { success ->
+                                                    authMessage = if (success) "🎉 +10 Minutes added to your time!" else "⚠️ Error updating time."
                                                 }
                                             },
                                             onDismissed = {
@@ -648,7 +648,7 @@ fun RecapStudioScreen(
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 modifier = Modifier.height(28.dp)
                             ) {
-                                Text("+20m (Ad)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("+10m (Ad)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }

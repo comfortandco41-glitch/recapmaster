@@ -38,7 +38,7 @@ object StartAppAdsManager {
     }
 
     /**
-     * Shows an Ad to earn 20 minutes of free recap use.
+     * Shows an Ad to earn 10 minutes of free recap use.
      * Tries REWARDED_VIDEO first. If video has status 204 (no content in user's region),
      * it automatically falls back to AUTOMATIC (Full-page Interstitial) with 100% fill rate!
      */
@@ -96,7 +96,7 @@ object StartAppAdsManager {
                 startAppAd.showAd(object : AdDisplayListener {
                     override fun adHidden(ad: Ad) {
                         Log.d(TAG, "Start.io ad hidden/closed")
-                        // If interstitial was shown or video ended, guarantee the user gets their 20 minutes!
+                        // If interstitial was shown or video ended, guarantee the user gets their 10 minutes!
                         if (!rewardGranted) {
                             rewardGranted = true
                             activity.runOnUiThread {

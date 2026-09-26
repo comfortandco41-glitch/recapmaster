@@ -99,7 +99,7 @@ object UserSubscriptionManager {
 
     /**
      * Called whenever Firebase Auth state changes.
-     * All new users start with 0 minutes and must watch a video ad (1 watch = 20 mins free use).
+     * All new users start with 0 minutes and must watch a video ad (1 watch = 10 mins free use).
      */
     fun onUserChanged(user: FirebaseUser?) {
         snapshotListener?.remove()
@@ -125,7 +125,7 @@ object UserSubscriptionManager {
             }
 
             if (snapshot == null || !snapshot.exists()) {
-                // New user: No 7-day trial. Must watch ads (1 watch = 20 mins free use)
+                // New user: No 7-day trial. Must watch ads (1 watch = 10 mins free use)
                 val now = System.currentTimeMillis()
                 val expiresAt = now // Expired by default
                 val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(expiresAt))
@@ -142,7 +142,7 @@ object UserSubscriptionManager {
                     "status" to "expired",
                     "isUnlimited" to false,
                     "isAdmin" to false,
-                    "note" to "New user (Ad-supported: 1 ad = 20 mins)"
+                    "note" to "New user (Ad-supported: 1 ad = 10 mins)"
                 )
 
                 docRef.set(initialData).addOnSuccessListener {
@@ -155,7 +155,7 @@ object UserSubscriptionManager {
                         status = "expired",
                         isUnlimited = false,
                         isAdmin = false,
-                        note = "New user (Ad-supported: 1 ad = 20 mins)"
+                        note = "New user (Ad-supported: 1 ad = 10 mins)"
                     )
                     _subscription.value = sub
                     saveToCache(sub)
@@ -283,10 +283,10 @@ object UserSubscriptionManager {
 
     /**
      * Called when user finishes watching a Rewarded Ad.
-     * Grants [minutes] (default 20 mins free use).
+     * Grants [minutes] (default 10 mins free use).
      * If already active, it stacks on top of remaining time.
      */
-    fun grantAdRewardMinutes(user: FirebaseUser?, minutes: Long = 20, onComplete: ((Boolean) -> Unit)? = null) {
+    fun grantAdRewardMinutes(user: FirebaseUser?, minutes: Long = 10, onComplete: ((Boolean) -> Unit)? = null) {
         if (user == null) {
             onComplete?.invoke(false)
             return

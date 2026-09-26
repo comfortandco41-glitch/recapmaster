@@ -107,7 +107,7 @@ class MainActivity : ComponentActivity() {
 
         val sub = com.recapmaster.app.auth.UserSubscriptionManager.subscription.value
         if (sub != null && sub.isExpired) {
-            android.widget.Toast.makeText(this, "⚠️ Free access expired! Please watch a video ad to get 20 minutes of free use.", android.widget.Toast.LENGTH_LONG).show()
+            android.widget.Toast.makeText(this, "⚠️ Free access expired! Please watch a video ad to get 10 minutes of free use.", android.widget.Toast.LENGTH_LONG).show()
             return
         }
 
