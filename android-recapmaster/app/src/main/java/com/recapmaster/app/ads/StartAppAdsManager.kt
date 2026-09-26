@@ -38,8 +38,9 @@ object StartAppAdsManager {
     }
 
     /**
-     * Shows a Rewarded Video Ad.
-     * 1 ad watch = 20 minutes free use.
+     * Shows an Ad to earn 20 minutes of free recap use.
+     * Tries REWARDED_VIDEO first. If video has status 204 (no content in user's region),
+     * it automatically falls back to AUTOMATIC (Full-page Interstitial) with 100% fill rate!
      */
     fun showRewardedAd(
         activity: Activity,
@@ -52,33 +53,68 @@ object StartAppAdsManager {
             initialize(activity.applicationContext)
         }
 
-        onStatusUpdate?.invoke("⏳ Loading video ad from Start.io...")
-        val rewardedAd = StartAppAd(activity)
+        onStatusUpdate?.invoke("⏳ Loading ad from Start.io...")
+        loadAndDisplayAd(
+            activity = activity,
+            adMode = StartAppAd.AdMode.REWARDED_VIDEO,
+            isFallback = false,
+            onStatusUpdate = onStatusUpdate,
+            onUserRewarded = onUserRewarded,
+            onDismissed = onDismissed,
+            onFailed = onFailed
+        )
+    }
 
-        // Video completion listener
-        rewardedAd.setVideoListener(object : VideoListener {
+    private fun loadAndDisplayAd(
+        activity: Activity,
+        adMode: StartAppAd.AdMode,
+        isFallback: Boolean,
+        onStatusUpdate: ((String) -> Unit)?,
+        onUserRewarded: () -> Unit,
+        onDismissed: (() -> Unit)?,
+        onFailed: ((String) -> Unit)?
+    ) {
+        val startAppAd = StartAppAd(activity)
+        var rewardGranted = false
+
+        // Listen for video completion
+        startAppAd.setVideoListener(object : VideoListener {
             override fun onVideoCompleted() {
-                Log.d(TAG, "Start.io Rewarded Video completed!")
-                activity.runOnUiThread {
-                    onUserRewarded()
+                Log.d(TAG, "Start.io video completed!")
+                if (!rewardGranted) {
+                    rewardGranted = true
+                    activity.runOnUiThread {
+                        onUserRewarded()
+                    }
                 }
             }
         })
 
-        // Load and display
-        rewardedAd.loadAd(StartAppAd.AdMode.REWARDED_VIDEO, object : AdEventListener {
+        startAppAd.loadAd(adMode, object : AdEventListener {
             override fun onReceiveAd(ad: Ad) {
-                onStatusUpdate?.invoke("🎬 Playing ad...")
-                rewardedAd.showAd(object : AdDisplayListener {
+                onStatusUpdate?.invoke("🎬 Showing ad...")
+                startAppAd.showAd(object : AdDisplayListener {
                     override fun adHidden(ad: Ad) {
-                        onDismissed?.invoke()
+                        Log.d(TAG, "Start.io ad hidden/closed")
+                        // If interstitial was shown or video ended, guarantee the user gets their 20 minutes!
+                        if (!rewardGranted) {
+                            rewardGranted = true
+                            activity.runOnUiThread {
+                                onUserRewarded()
+                            }
+                        } else {
+                            onDismissed?.invoke()
+                        }
                     }
+
                     override fun adDisplayed(ad: Ad) {
-                        Log.d(TAG, "Start.io ad displayed")
+                        Log.d(TAG, "Start.io ad displayed successfully")
                     }
+
                     override fun adClicked(ad: Ad) {
                         Log.d(TAG, "Start.io ad clicked")
                     }
+
                     override fun adNotDisplayed(ad: Ad) {
                         activity.runOnUiThread {
                             onFailed?.invoke("Ad could not be displayed")
@@ -88,10 +124,28 @@ object StartAppAdsManager {
             }
 
             override fun onFailedToReceiveAd(ad: Ad?) {
-                val err = ad?.errorMessage ?: "No ad available right now"
-                Log.w(TAG, "Start.io failed to receive ad: $err")
-                activity.runOnUiThread {
-                    onFailed?.invoke(err)
+                val err = ad?.errorMessage ?: "No ad available"
+                Log.w(TAG, "Start.io load error ($adMode): $err")
+
+                // If REWARDED_VIDEO returned 204 or failed, fallback to AUTOMATIC mode immediately!
+                if (!isFallback) {
+                    Log.d(TAG, "Falling back to StartAppAd.AdMode.AUTOMATIC for 100% fill rate...")
+                    activity.runOnUiThread {
+                        onStatusUpdate?.invoke("⏳ Buffering alternative ad...")
+                    }
+                    loadAndDisplayAd(
+                        activity = activity,
+                        adMode = StartAppAd.AdMode.AUTOMATIC,
+                        isFallback = true,
+                        onStatusUpdate = onStatusUpdate,
+                        onUserRewarded = onUserRewarded,
+                        onDismissed = onDismissed,
+                        onFailed = onFailed
+                    )
+                } else {
+                    activity.runOnUiThread {
+                        onFailed?.invoke(err)
+                    }
                 }
             }
         })
