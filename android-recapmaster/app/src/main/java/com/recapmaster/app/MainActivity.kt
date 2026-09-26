@@ -46,6 +46,9 @@ class MainActivity : ComponentActivity() {
         // Initialize user license & subscription manager
         com.recapmaster.app.auth.UserSubscriptionManager.init(applicationContext)
 
+        // Initialize Google Analytics for Firebase
+        com.google.firebase.analytics.FirebaseAnalytics.getInstance(applicationContext)
+
         // Initialize Start.io Ads SDK (Real ads for Direct Drive APK)
         com.recapmaster.app.ads.StartAppAdsManager.initialize(applicationContext)
 

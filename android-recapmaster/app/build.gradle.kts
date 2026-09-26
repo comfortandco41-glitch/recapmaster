@@ -133,10 +133,11 @@ dependencies {
     // Compose animation (AnimatedVisibility)
     implementation("androidx.compose.animation:animation:1.6.7")
 
-    // Firebase Authentication, Firestore & Google Sign-In
+    // Firebase Authentication, Firestore, Analytics & Google Sign-In
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
+    implementation("com.google.firebase:firebase-analytics-ktx")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // Start.io (StartApp) InApp SDK - Real Ads for Direct APK Distribution
