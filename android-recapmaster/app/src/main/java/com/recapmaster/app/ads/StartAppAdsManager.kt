@@ -111,6 +111,9 @@ object StartAppAdsManager {
             override fun onFailedToReceiveAd(view: View?) {
                 Log.w(TAG, "Start.io banner failed to load")
             }
+            override fun onImpression(view: View?) {
+                Log.d(TAG, "Start.io banner impression recorded")
+            }
             override fun onClick(view: View?) {}
         })
         return banner
