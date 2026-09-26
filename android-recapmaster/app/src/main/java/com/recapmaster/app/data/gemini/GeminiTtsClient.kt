@@ -76,8 +76,8 @@ class GeminiTtsClient {
         voiceName: String,
         promptPersona: String
     ): ByteArray {
-        // Gemini models with native AUDIO response modality support
-        val models = listOf("gemini-2.0-flash", "gemini-2.0-flash-exp")
+        // Dedicated Google Gemini Speech Synthesis (TTS) models
+        val models = listOf("gemini-3.8-flash-tts", "gemini-3.8-flash-lite-tts", "gemini-2.5-flash-preview-tts")
         var lastException: Exception? = null
 
         for (model in models) {
@@ -87,7 +87,7 @@ class GeminiTtsClient {
                 lastException = e
             }
         }
-        throw lastException ?: RuntimeException("Gemini Audio synthesis failed across available models.")
+        throw lastException ?: RuntimeException("Gemini Audio synthesis failed across available TTS models.")
     }
 
     private fun callGeminiAudioApi(
@@ -99,29 +99,13 @@ class GeminiTtsClient {
     ): ByteArray {
         val endpoint = "https://generativelanguage.googleapis.com/v1beta/models/$modelName:generateContent?key=$apiKey"
 
-        val styleInstruction = if (promptPersona.isNotBlank()) {
-            "Voice style directive: $promptPersona."
-        } else {
-            "Voice style: natural, engaging, cinematic Burmese movie recap narrator."
-        }
-
-        val promptText = """
-You are a professional movie recap narrator.
-CRITICAL INSTRUCTIONS:
-1. Speak aloud the following Burmese narration text fluently and expressively in Burmese.
-2. $styleInstruction
-3. Speak ONLY the exact script text provided below. Do NOT add any greetings, intro, or commentary.
-
-Script to read:
-$text
-        """.trimIndent()
-
+        // For dedicated TTS models, send the script directly without conversational instructions
         val jsonBody = JSONObject().apply {
             put("contents", JSONArray().apply {
                 put(JSONObject().apply {
                     put("role", "user")
                     put("parts", JSONArray().apply {
-                        put(JSONObject().put("text", promptText))
+                        put(JSONObject().put("text", text))
                     })
                 })
             })
@@ -132,7 +116,7 @@ $text
                 put("speechConfig", JSONObject().apply {
                     put("voiceConfig", JSONObject().apply {
                         put("prebuiltVoiceConfig", JSONObject().apply {
-                            put("voiceName", voiceName)
+                            put("voiceName", if (voiceName.isNotBlank()) voiceName else "Puck")
                         })
                     })
                 })
