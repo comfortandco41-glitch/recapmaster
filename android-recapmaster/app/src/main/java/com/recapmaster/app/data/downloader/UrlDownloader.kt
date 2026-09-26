@@ -3,6 +3,7 @@ package com.recapmaster.app.data.downloader
 import android.content.Context
 import com.chaquo.python.Python
 import com.chaquo.python.android.AndroidPlatform
+import com.recapmaster.app.engine.FFmpegEngine
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -14,7 +15,10 @@ data class DownloadResult(
     val localFile: File
 )
 
-class UrlDownloader(private val context: Context? = null) {
+class UrlDownloader(
+    private val context: Context? = null,
+    private val ffmpegEngine: FFmpegEngine? = null
+) {
 
     suspend fun downloadUrl(url: String, targetFile: File): DownloadResult = withContext(Dispatchers.IO) {
         if (!Python.isStarted()) {
@@ -34,11 +38,32 @@ class UrlDownloader(private val context: Context? = null) {
             throw RuntimeException(err)
         }
 
-        val actualPath = obj.getString("filePath")
+        val videoPath = obj.getString("filePath")
+        val audioPath = obj.optString("audioPath", null)
+        val needsMux = obj.optBoolean("needsMux", false)
+
+        val finalFile: File = if (needsMux && !audioPath.isNullOrBlank() && ffmpegEngine != null) {
+            val videoFile = File(videoPath)
+            val audioFile = File(audioPath)
+            if (videoFile.exists() && audioFile.exists()) {
+                try {
+                    ffmpegEngine.muxVideoAndAudio(videoFile, audioFile, targetFile)
+                } catch (_: Throwable) {
+                    // Fallback to video file if mux fails
+                    videoFile
+                }
+            } else {
+                videoFile
+            }
+        } else {
+            File(videoPath)
+        }
+
         DownloadResult(
             title = obj.optString("title", "Recap Source"),
             durationSeconds = obj.optDouble("duration", 0.0),
-            localFile = File(actualPath)
+            localFile = finalFile
         )
     }
 }
+

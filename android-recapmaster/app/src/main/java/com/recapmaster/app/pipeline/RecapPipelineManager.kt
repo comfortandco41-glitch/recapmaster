@@ -65,8 +65,8 @@ class RecapPipelineManager(private val context: Context) {
     private val _state = MutableStateFlow(PipelineState())
     val state: StateFlow<PipelineState> = _state
 
-    private val downloader = UrlDownloader(context)
     private val ffmpegEngine = FFmpegEngine(context)
+    private val downloader = UrlDownloader(context, ffmpegEngine)
     private val whisperEngine = WhisperEngine(context)
     private val edgeTtsClient = EdgeTtsClient()
     private val geminiTtsClient = GeminiTtsClient()

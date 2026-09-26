@@ -151,6 +151,27 @@ class FFmpegEngine(private val context: Context) {
     }
 
     /**
+     * Muxes downloaded HD video stream and audio stream into a single MP4 container
+     * without re-encoding the video stream (-c:v copy).
+     */
+    suspend fun muxVideoAndAudio(
+        videoFile: File,
+        audioFile: File,
+        outputFile: File
+    ): File = withContext(Dispatchers.IO) {
+        outputFile.parentFile?.mkdirs()
+        val cmd = "-y -i \"${videoFile.absolutePath}\" -i \"${audioFile.absolutePath}\" " +
+                "-c:v copy -c:a aac -b:a 192k -shortest \"${outputFile.absolutePath}\""
+        executeFfmpeg(cmd)
+        try { videoFile.delete() } catch (_: Throwable) {}
+        try { audioFile.delete() } catch (_: Throwable) {}
+        if (!outputFile.exists() || outputFile.length() == 0L) {
+            throw RuntimeException("Muxing video and audio streams failed")
+        }
+        outputFile
+    }
+
+    /**
      * Generates a 24kHz 16-bit Mono PCM WAV file containing exact digital silence.
      * Zero-overhead, zero-subprocess, 100% instantaneous Kotlin generation.
      */
@@ -457,18 +478,38 @@ class FFmpegEngine(private val context: Context) {
         }
 
         // ── Assemble final FFmpeg command ─────────────────────────────────
+        val isMp4Source = sourceVideo.name.endsWith(".mp4", ignoreCase = true)
+
+        // Fast-path: When no video filters are active (no watermark blur, speed is 1.0x, no subtitles),
+        // stream-copy the video (-c:v copy) to preserve 100% of the original source video quality with zero loss.
+        if (!hasVideoFilter && isMp4Source) {
+            val copyCmd = "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
+                "-filter_complex \"$audioPart\" " +
+                "-map 0:v:0 -map \"[a_out]\" " +
+                "-c:v copy -c:a aac -b:a 192k $timeLimitArg \"${outputVideo.absolutePath}\""
+            try {
+                executeFfmpeg(copyCmd, totalDurationSeconds = durationLimit, onProgress = onProgress)
+                if (outputVideo.exists() && outputVideo.length() > 0L) {
+                    return@withContext outputVideo
+                }
+            } catch (_: Throwable) {
+                // If stream copy fails due to container or packet timing, fall back to high-quality re-encode below
+                outputVideo.delete()
+            }
+        }
+
         val cmd: String = if (hasVideoFilter) {
             val fullFilter = "$videoFilterStr;$audioPart"
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$fullFilter\" " +
                 "-map \"[$currentV]\" -map \"[a_out]\" " +
-                "-c:v libx264 -preset ultrafast -crf 23 -threads 0 -pix_fmt yuv420p " +
+                "-c:v libx264 -preset veryfast -crf 18 -threads 0 -pix_fmt yuv420p " +
                 "-c:a aac -b:a 192k $timeLimitArg \"${outputVideo.absolutePath}\""
         } else {
             "-y -i \"${sourceVideo.absolutePath}\" -i \"${dubbedVoiceAudio.absolutePath}\" " +
                 "-filter_complex \"$audioPart\" " +
                 "-map 0:v:0 -map \"[a_out]\" " +
-                "-c:v libx264 -preset ultrafast -crf 23 -threads 0 -pix_fmt yuv420p " +
+                "-c:v libx264 -preset veryfast -crf 18 -threads 0 -pix_fmt yuv420p " +
                 "-c:a aac -b:a 192k $timeLimitArg \"${outputVideo.absolutePath}\""
         }
 
