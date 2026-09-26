@@ -269,12 +269,18 @@ fun RecapStudioScreen(
                 title = {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Icon(Icons.Default.Movie, contentDescription = null, tint = Purple)
+                        androidx.compose.foundation.Image(
+                            painter = androidx.compose.ui.res.painterResource(id = com.recapmaster.app.R.drawable.app_logo),
+                            contentDescription = "App Logo",
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                        )
                         Column {
-                            Text("RecapMaster AI Studio", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
-                            Text("Burmese Voiceover Recap Engine", fontSize = 10.sp, color = TextMuted)
+                            Text("RecapMaster", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                            Text("by the AI Buddy", fontSize = 11.sp, color = Cyan, fontWeight = FontWeight.SemiBold)
                         }
                     }
                 },
