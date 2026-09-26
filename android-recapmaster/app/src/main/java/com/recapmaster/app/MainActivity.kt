@@ -46,8 +46,8 @@ class MainActivity : ComponentActivity() {
         // Initialize user license & subscription manager
         com.recapmaster.app.auth.UserSubscriptionManager.init(applicationContext)
 
-        // Initialize Unity Ads SDK
-        com.recapmaster.app.ads.UnityAdsManager.initialize(applicationContext)
+        // Initialize Start.io Ads SDK (Real ads for Direct Drive APK)
+        com.recapmaster.app.ads.StartAppAdsManager.initialize(applicationContext)
 
         // Request runtime permissions required on Android 13/14
         requestRuntimePermissions()
@@ -58,13 +58,13 @@ class MainActivity : ComponentActivity() {
                 color = Color(0xFF09090B)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // 📱 Top Unity Banner Ad (BP_Banner_Android)
+                    // 📱 Top Banner Ad (Start.io)
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
-                        factory = {
-                            com.recapmaster.app.ads.UnityAdsManager.createBannerView(this@MainActivity)
+                        factory = { ctx ->
+                            com.recapmaster.app.ads.StartAppAdsManager.createBannerView(ctx)
                         }
                     )
 
@@ -74,13 +74,13 @@ class MainActivity : ComponentActivity() {
                             onStartPipeline = { params -> startPipelineSafely(params) }
                         )
                     }
-                    // 📱 Bottom Unity Banner Ad (BP_Banner_Android)
+                    // 📱 Bottom Banner Ad (Start.io)
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(50.dp),
-                        factory = {
-                            com.recapmaster.app.ads.UnityAdsManager.createBannerView(this@MainActivity)
+                        factory = { ctx ->
+                            com.recapmaster.app.ads.StartAppAdsManager.createBannerView(ctx)
                         }
                     )
                 }

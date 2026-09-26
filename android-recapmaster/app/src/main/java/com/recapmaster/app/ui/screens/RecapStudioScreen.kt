@@ -529,13 +529,13 @@ fun RecapStudioScreen(
                             }
                         }
 
-                        // 🎬 Unity Rewarded Ad: Free 20-Minute Pass
+                        // 🎬 Start.io Rewarded Ad: Free 20-Minute Pass
                         Button(
                             onClick = {
                                 val activity = context as? android.app.Activity
                                 if (activity != null) {
                                     authMessage = "⏳ Loading video ad..."
-                                    com.recapmaster.app.ads.UnityAdsManager.showRewardedAd(
+                                    com.recapmaster.app.ads.StartAppAdsManager.showRewardedAd(
                                         activity = activity,
                                         onStatusUpdate = { status -> authMessage = status },
                                         onUserRewarded = {
@@ -620,7 +620,7 @@ fun RecapStudioScreen(
                                     val activity = context as? android.app.Activity
                                     if (activity != null) {
                                         authMessage = "⏳ Loading video ad..."
-                                        com.recapmaster.app.ads.UnityAdsManager.showRewardedAd(
+                                        com.recapmaster.app.ads.StartAppAdsManager.showRewardedAd(
                                             activity = activity,
                                             onStatusUpdate = { status -> authMessage = status },
                                             onUserRewarded = {
