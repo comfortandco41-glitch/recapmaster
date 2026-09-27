@@ -14,8 +14,8 @@ android {
         applicationId = "com.recapmaster.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -133,15 +133,19 @@ dependencies {
     // Compose animation (AnimatedVisibility)
     implementation("androidx.compose.animation:animation:1.6.7")
 
-    // Firebase Authentication, Firestore, Analytics & Google Sign-In
+    // Firebase Authentication, Firestore, Analytics, Messaging & Google Sign-In
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-auth-ktx")
     implementation("com.google.firebase:firebase-firestore-ktx")
     implementation("com.google.firebase:firebase-analytics-ktx")
+    implementation("com.google.firebase:firebase-messaging-ktx")
     implementation("com.google.android.gms:play-services-auth:21.2.0")
 
     // Start.io (StartApp) InApp SDK - Real Ads for Direct APK Distribution
     implementation("com.startapp:inapp-sdk:5.1.0")
+
+    // AndroidX Browser (Chrome Custom Tabs for Adsterra Direct Link / Smartlink Ads)
+    implementation("androidx.browser:browser:1.8.0")
 
     // Testing
     testImplementation("junit:junit:4.13.2")

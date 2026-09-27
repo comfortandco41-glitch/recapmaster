@@ -141,16 +141,37 @@ class RecapPipelineManager(private val context: Context) {
         val previewVideo = File(workDir, "dubbed_preview.mp4")
 
         try {
-            // Stage 1: Download
-            log("📥 [1/5] Downloading video from URL...", PipelineStage.DOWNLOADING, progress = 0.05f, stageProgress = 0.15f)
-            val downloadRes = downloader.downloadUrl(videoUrl, sourceVideo)
-            val probedDur = ffmpegEngine.getMediaDurationSeconds(downloadRes.localFile)
-            val videoDuration = if (probedDur > 0.5) probedDur else if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
-            log("✅ Downloaded: ${downloadRes.title} (${videoDuration.toInt()}s)", progress = 0.18f, stageProgress = 1.0f)
+            // Stage 1: Obtain source video (Local Gallery / Storage OR Remote URL download)
+            val isLocalMedia = videoUrl.startsWith("content://") || videoUrl.startsWith("file://") || File(videoUrl).exists()
+            val (resolvedVideoFile, videoTitle, videoDuration) = if (isLocalMedia) {
+                log("📂 [1/5] Loading local video from Gallery/Storage...", PipelineStage.DOWNLOADING, progress = 0.05f, stageProgress = 0.15f)
+                if (videoUrl.startsWith("content://")) {
+                    val uri = Uri.parse(videoUrl)
+                    context.contentResolver.openInputStream(uri)?.use { input ->
+                        sourceVideo.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
+                    } ?: throw IllegalArgumentException("Could not open selected video from gallery")
+                } else {
+                    val srcFile = File(videoUrl.removePrefix("file://"))
+                    srcFile.copyTo(sourceVideo, overwrite = true)
+                }
+                val probedDur = ffmpegEngine.getMediaDurationSeconds(sourceVideo)
+                val duration = if (probedDur > 0.5) probedDur else 60.0
+                log("✅ Loaded local video (${duration.toInt()}s)", progress = 0.18f, stageProgress = 1.0f)
+                Triple(sourceVideo, "Local Video", duration)
+            } else {
+                log("📥 [1/5] Downloading video from URL...", PipelineStage.DOWNLOADING, progress = 0.05f, stageProgress = 0.15f)
+                val downloadRes = downloader.downloadUrl(videoUrl, sourceVideo)
+                val probedDur = ffmpegEngine.getMediaDurationSeconds(downloadRes.localFile)
+                val duration = if (probedDur > 0.5) probedDur else if (downloadRes.durationSeconds > 0) downloadRes.durationSeconds else 60.0
+                log("✅ Downloaded: ${downloadRes.title} (${duration.toInt()}s)", progress = 0.18f, stageProgress = 1.0f)
+                Triple(downloadRes.localFile, downloadRes.title, duration)
+            }
 
             // Stage 2: Audio Extraction
             log("🎙️ [2/5] Extracting speech audio for Whisper...", PipelineStage.EXTRACTING_AUDIO, progress = 0.22f, stageProgress = 0.15f)
-            ffmpegEngine.extractSpeechAudio(downloadRes.localFile, extractedAudio)
+            ffmpegEngine.extractSpeechAudio(resolvedVideoFile, extractedAudio)
             log("✅ Audio extracted (16kHz mono PCM)", progress = 0.32f, stageProgress = 1.0f)
 
             // Stage 3: On-Device Whisper Transcription
@@ -270,17 +291,17 @@ class RecapPipelineManager(private val context: Context) {
             // Prepare instant synced preview video (fast stream copy)
             log("⚡ Preparing synchronized video for live watermark & blur preview...", progress = 0.85f)
             try {
-                ffmpegEngine.muxPreviewDubbedVideo(downloadRes.localFile, voiceAudio, previewVideo)
+                ffmpegEngine.muxPreviewDubbedVideo(resolvedVideoFile, voiceAudio, previewVideo)
             } catch (e: Throwable) {
                 log("ℹ️ Preview mux note: using original video stream for preview", progress = 0.88f)
             }
 
             // Save active job references for live studio tuning
             activeWorkDir = workDir
-            activeSourceVideo = downloadRes.localFile
+            activeSourceVideo = resolvedVideoFile
             activeVoiceAudio = voiceAudio
             activeBurmeseTranscript = burmeseTranscript
-            activePreviewVideo = if (previewVideo.exists() && previewVideo.length() > 0) previewVideo else downloadRes.localFile
+            activePreviewVideo = if (previewVideo.exists() && previewVideo.length() > 0) previewVideo else resolvedVideoFile
 
             log("✨ Video dubbed successfully! Ready for live watermark blur & speed tuning.", PipelineStage.DUBBED_READY, 0.90f, 1.0f)
             _state.value = _state.value.copy(

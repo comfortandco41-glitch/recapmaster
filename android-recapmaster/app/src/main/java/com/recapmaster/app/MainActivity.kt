@@ -24,8 +24,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import android.net.Uri
 
 class MainActivity : ComponentActivity() {
 
@@ -49,8 +66,15 @@ class MainActivity : ComponentActivity() {
         // Initialize Google Analytics for Firebase
         com.google.firebase.analytics.FirebaseAnalytics.getInstance(applicationContext)
 
-        // Initialize Start.io Ads SDK (Real ads for Direct Drive APK)
+        // Initialize Start.io Ads SDK & Adsterra Direct Link Manager
         com.recapmaster.app.ads.StartAppAdsManager.initialize(applicationContext)
+        com.recapmaster.app.ads.AdsterraAdsManager.initialize(applicationContext)
+
+        // Initialize Firebase Cloud Messaging topic subscriptions
+        com.recapmaster.app.fcm.RecapFirebaseMessagingService.subscribeToDefaultTopics()
+
+        // Check for app updates via Firestore (app_config/update)
+        com.recapmaster.app.update.AppUpdateManager.checkForUpdates(applicationContext)
 
         // Request runtime permissions required on Android 13/14
         requestRuntimePermissions()
@@ -86,6 +110,80 @@ class MainActivity : ComponentActivity() {
                             com.recapmaster.app.ads.StartAppAdsManager.createBannerView(ctx)
                         }
                     )
+
+                    // 🚀 In-App Update Dialog (Driven live from Firestore app_config/update)
+                    val updateInfo by com.recapmaster.app.update.AppUpdateManager.updateState.collectAsState()
+                    if (updateInfo != null && updateInfo!!.isAvailable) {
+                        val info = updateInfo!!
+                        AlertDialog(
+                            onDismissRequest = {
+                                if (!info.isForceUpdate) {
+                                    com.recapmaster.app.update.AppUpdateManager.dismissUpdate()
+                                }
+                            },
+                            icon = {
+                                Icon(
+                                    Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = Color(0xFF38BDF8),
+                                    modifier = Modifier.size(32.dp)
+                                )
+                            },
+                            title = {
+                                Text(
+                                    text = "🚀 New Update Available (v${info.latestVersionName})",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color.White
+                                )
+                            },
+                            text = {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = info.releaseNotes,
+                                        fontSize = 12.sp,
+                                        color = Color(0xFFA1A1AA),
+                                        lineHeight = 16.sp
+                                    )
+                                    if (info.isForceUpdate) {
+                                        Text(
+                                            text = "⚠️ Please update to continue using RecapMaster (အသုံးပြုရန် Update လုပ်ပေးပါ).",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFFFBBF24)
+                                        )
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                Button(
+                                    onClick = {
+                                        try {
+                                            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(info.downloadUrl.trim()))
+                                            startActivity(browserIntent)
+                                        } catch (e: Exception) {
+                                            e.printStackTrace()
+                                        }
+                                    },
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color(0xFF38BDF8),
+                                        contentColor = Color.Black
+                                    ),
+                                    shape = RoundedCornerShape(8.dp)
+                                ) {
+                                    Text("Download Update (ဒေါင်းလုဒ်ဆွဲရန်)", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            },
+                            dismissButton = if (!info.isForceUpdate) {
+                                {
+                                    TextButton(onClick = { com.recapmaster.app.update.AppUpdateManager.dismissUpdate() }) {
+                                        Text("Later", color = Color(0xFF71717A))
+                                    }
+                                }
+                            } else null,
+                            containerColor = Color(0xFF18181B)
+                        )
+                    }
                 }
             }
         }
@@ -136,6 +234,12 @@ class MainActivity : ComponentActivity() {
             blurStrength     = params.blurStrength,
             dubbingMode      = params.dubbingMode
         )
+
+        if (params.url.startsWith("content://")) {
+            try {
+                grantUriPermission(packageName, android.net.Uri.parse(params.url), Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Throwable) {}
+        }
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

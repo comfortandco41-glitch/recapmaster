@@ -46,11 +46,7 @@ def download_video(url: str, output_path: str) -> str:
     is_youtube = bool(re.search(r"(youtube\.com|youtu\.be)", url, re.I))
     is_bilibili = bool(re.search(r"(bilibili\.com|b23\.tv)", url, re.I))
 
-    headers = {
-        "User-Agent": (
-            "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
-        ),
-    }
+    headers = {}
     if is_bilibili:
         headers["Referer"] = "https://www.bilibili.com"
         headers["User-Agent"] = (
@@ -65,12 +61,15 @@ def download_video(url: str, output_path: str) -> str:
         "noplaylist": True,
         "abort_on_error": False,
         "continuedl": True,
-        "http_headers": headers,
     }
+    if headers:
+        base_opts["http_headers"] = headers
+
     if is_youtube:
         base_opts["extractor_args"] = {
             "youtube": {
-                "player_client": ["android", "web", "ios"],
+                # Prioritize iOS and mweb clients which do not enforce strict GMS PO-token challenges on datacenter/VPN IPs
+                "player_client": ["ios", "mweb", "android_creator", "web"],
             }
         }
 
@@ -203,7 +202,15 @@ def download_video(url: str, output_path: str) -> str:
 
     except yt_dlp.utils.DownloadError as de:
         err = str(de)
-        if "requested format is not available" in err.lower():
+        if "sign in to confirm you're not a bot" in err.lower():
+            err = (
+                "⚠️ YouTube Bot Check: This VPN server IP is temporarily challenged by YouTube.\n"
+                "💡 Quick Fixes:\n"
+                "1. Click '📁 Pick Video from Gallery' to select a downloaded video directly.\n"
+                "2. Switch your VPN location (e.g. Singapore -> Japan/US/Taiwan).\n"
+                "3. Turn off VPN or use split-tunneling if YouTube is accessible directly."
+            )
+        elif "requested format is not available" in err.lower():
             err = (
                 "No compatible video format was available for this URL. "
                 "Try a different video or check if the video is age-restricted/private. "

@@ -1,6 +1,7 @@
 package com.recapmaster.app.ui.screens
 
 import android.content.Intent
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import com.google.android.gms.auth.api.signin.GoogleSignIn
@@ -141,8 +142,32 @@ fun RecapStudioScreen(
     }
 
     // ── Input state ───────────────────────────────────────────────────────────
-    var urlInput       by remember { mutableStateOf("") }
-    var geminiKey      by remember { mutableStateOf("") }
+    var urlInput          by remember { mutableStateOf("") }
+    var selectedVideoUri  by remember { mutableStateOf<Uri?>(null) }
+    var selectedVideoName by remember { mutableStateOf<String?>(null) }
+    var geminiKey         by remember { mutableStateOf("") }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            selectedVideoUri = uri
+            var name = "Selected Video"
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex != -1 && cursor.moveToFirst()) {
+                        val queryName = cursor.getString(nameIndex)
+                        if (!queryName.isNullOrBlank()) {
+                            name = queryName
+                        }
+                    }
+                }
+            } catch (_: Throwable) {}
+            selectedVideoName = name
+            urlInput = "" // Clear URL input when picking local video
+        }
+    }
 
     val coroutineScope = rememberCoroutineScope()
 
@@ -535,17 +560,17 @@ fun RecapStudioScreen(
                             }
                         }
 
-                        // 🎬 Start.io Rewarded Ad: Free 10-Minute Pass
+                        // 🎬 Adsterra Rewarded Sponsor Ad: Free 10-Minute Pass
                         Button(
                             onClick = {
                                 val activity = context as? android.app.Activity
                                 if (activity != null) {
-                                    authMessage = "⏳ Loading video ad..."
-                                    com.recapmaster.app.ads.StartAppAdsManager.showRewardedAd(
+                                    authMessage = "⏳ Opening sponsor ad..."
+                                    com.recapmaster.app.ads.AdsterraAdsManager.showRewardedAd(
                                         activity = activity,
                                         onStatusUpdate = { status -> authMessage = status },
                                         onUserRewarded = {
-                                            authMessage = "🎉 Ad complete! Adding 10 minutes of free access..."
+                                            authMessage = "🎉 Sponsor ad visited! Adding 10 minutes of free access..."
                                             UserSubscriptionManager.grantAdRewardMinutes(currentUser, 10) { success ->
                                                 authMessage = if (success) {
                                                     "✅ Success! +10 Minutes added. You can start recap generation now!"
@@ -555,7 +580,7 @@ fun RecapStudioScreen(
                                             }
                                         },
                                         onDismissed = {
-                                            authMessage = "⚠️ Ad closed before completion. Please watch the full video to unlock 10 minutes."
+                                            authMessage = "⚠️ Ad closed."
                                         },
                                         onFailed = { err ->
                                             authMessage = "⚠️ Ad error: $err"
@@ -614,6 +639,7 @@ fun RecapStudioScreen(
                             Spacer(modifier = Modifier.width(8.dp))
                             Column {
                                 val titleText = if (subscription!!.isAdmin) "👑 Admin Account: Unlimited Access"
+                                    else if (subscription!!.isMaxRewardReached) "⏱️ Free Access: 24h Max Limit Reached"
                                     else "⏱️ Free Access: ${subscription!!.formattedRemainingTime} remaining"
                                 Text(titleText, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
                                 Text("Expires: ${subscription!!.formattedExpiry}", fontSize = 9.sp, color = TextMuted)
@@ -621,21 +647,26 @@ fun RecapStudioScreen(
                         }
 
                         if (!subscription!!.isAdmin) {
+                            val isMaxReached = subscription!!.isMaxRewardReached
                             Button(
                                 onClick = {
+                                    if (isMaxReached) {
+                                        authMessage = "⚠️ Maximum 24-hour limit reached! You already have full access. (အများဆုံး ၂၄ နာရီအထိသာ ကြိုတင်တိုးနိုင်ပါသည်)"
+                                        return@Button
+                                    }
                                     val activity = context as? android.app.Activity
                                     if (activity != null) {
-                                        authMessage = "⏳ Loading video ad..."
-                                        com.recapmaster.app.ads.StartAppAdsManager.showRewardedAd(
+                                        authMessage = "⏳ Opening sponsor ad..."
+                                        com.recapmaster.app.ads.AdsterraAdsManager.showRewardedAd(
                                             activity = activity,
                                             onStatusUpdate = { status -> authMessage = status },
                                             onUserRewarded = {
                                                 UserSubscriptionManager.grantAdRewardMinutes(currentUser, 10) { success ->
-                                                    authMessage = if (success) "🎉 +10 Minutes added to your time!" else "⚠️ Error updating time."
+                                                    authMessage = if (success) "🎉 +10 Minutes added to your time!" else "⚠️ Max 24h limit reached (အများဆုံး ၂၄ နာရီသာ ရရှိနိုင်ပါသည်)."
                                                 }
                                             },
                                             onDismissed = {
-                                                authMessage = "⚠️ Ad closed before completion."
+                                                authMessage = "⚠️ Ad closed."
                                             },
                                             onFailed = { err ->
                                                 authMessage = "⚠️ Ad error: $err"
@@ -643,12 +674,18 @@ fun RecapStudioScreen(
                                         )
                                     }
                                 },
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9800), contentColor = Color.Black),
+                                enabled = !isMaxReached,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isMaxReached) Color(0xFF27272A) else Color(0xFFFF9800),
+                                    contentColor = if (isMaxReached) Color(0xFF71717A) else Color.Black,
+                                    disabledContainerColor = Color(0xFF27272A),
+                                    disabledContentColor = Color(0xFF71717A)
+                                ),
                                 shape = RoundedCornerShape(8.dp),
                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                 modifier = Modifier.height(28.dp)
                             ) {
-                                Text("+10m (Ad)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text(if (isMaxReached) "Max (24h)" else "+10m (Ad)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -659,16 +696,112 @@ fun RecapStudioScreen(
             StudioCard(title = "1. Source Video", icon = Icons.Default.VideoLibrary, accentColor = Purple) {
                 OutlinedTextField(
                     value = urlInput,
-                    onValueChange = { urlInput = it },
+                    onValueChange = {
+                        urlInput = it
+                        if (it.isNotBlank()) {
+                            selectedVideoUri = null
+                            selectedVideoName = null
+                        }
+                    },
                     placeholder = { Text("https://youtube.com/watch?v=... or https://b23.tv/...", color = TextMuted, fontSize = 12.sp) },
                     leadingIcon = { Icon(Icons.Default.Link, contentDescription = null, tint = Purple) },
                     trailingIcon = if (urlInput.isNotEmpty()) {
-                        { IconButton(onClick = { urlInput = "" }) { Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextMuted) } }
+                        {
+                            IconButton(onClick = { urlInput = "" }) {
+                                Icon(Icons.Default.Clear, contentDescription = "Clear", tint = TextMuted)
+                            }
+                        }
                     } else null,
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     colors = textFieldColors(focusedBorderColor = Purple)
                 )
+
+                // ── Divider with OR ──────────────────────────────────────────
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = Border)
+                    Text("  OR (သို့မဟုတ်)  ", fontSize = 10.sp, color = TextMuted, fontWeight = FontWeight.Bold)
+                    HorizontalDivider(modifier = Modifier.weight(1f), color = Border)
+                }
+
+                // ── Selected Local Video Card ────────────────────────────────
+                if (selectedVideoUri != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = Green.copy(alpha = 0.12f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Green.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Green, modifier = Modifier.size(22.dp))
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
+                                    Text(
+                                        text = selectedVideoName ?: "Selected Video",
+                                        fontSize = 12.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "⚡ Local video ready (No YouTube download or VPN required!)",
+                                        fontSize = 10.sp,
+                                        color = Green
+                                    )
+                                }
+                            }
+                            IconButton(
+                                onClick = {
+                                    selectedVideoUri = null
+                                    selectedVideoName = null
+                                },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = "Remove", tint = TextMuted, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                }
+
+                // ── Pick from Gallery / Storage Button ────────────────────────
+                OutlinedButton(
+                    onClick = { videoPickerLauncher.launch("video/*") },
+                    modifier = Modifier.fillMaxWidth().height(46.dp),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = if (selectedVideoUri != null) Green else PurpleLight,
+                        containerColor = if (selectedVideoUri != null) Green.copy(alpha = 0.06f) else Color.Transparent
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(
+                        1.dp,
+                        if (selectedVideoUri != null) Green.copy(alpha = 0.6f) else Purple.copy(alpha = 0.5f)
+                    )
+                ) {
+                    Icon(
+                        if (selectedVideoUri != null) Icons.Default.Check else Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (selectedVideoUri != null) "📁 Change Video (ဖုန်းထဲမှ Video ပြောင်းရန်)" else "📁 Pick Video from Gallery / Storage (ဖုန်းထဲမှ Video ရွေးရန်)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
 
                 OutlinedTextField(
                     value = geminiKey,
@@ -681,6 +814,45 @@ fun RecapStudioScreen(
                     colors = textFieldColors(focusedBorderColor = Cyan),
                     supportingText = { Text("Required for Burmese translation, narration script & Gemini AI Voice", fontSize = 10.sp, color = TextMuted) }
                 )
+
+                // 🔑 Clickable link for obtaining Gemini API Key
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "Don't have an API Key? (Key မရှိသေးပါက)",
+                        fontSize = 10.sp,
+                        color = TextMuted
+                    )
+                    TextButton(
+                        onClick = {
+                            try {
+                                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://aistudio.google.com/api-keys"))
+                                context.startActivity(browserIntent)
+                            } catch (_: Exception) {}
+                        },
+                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                        modifier = Modifier.height(28.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            tint = Cyan,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Get Free Gemini Key ↗ (အခမဲ့ရယူရန်)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Cyan
+                        )
+                    }
+                }
             }
 
             // ── Card 2: Voice Profile & Dubbing ───────────────────────────
@@ -927,7 +1099,8 @@ fun RecapStudioScreen(
             }
 
             // ── Step 1: Start Dubbing Button ──────────────────────────────
-            val canStartDubbing = isUserLoggedIn && !isExpired && !isProcessing && urlInput.isNotBlank() && geminiKey.isNotBlank()
+            val hasSource = urlInput.isNotBlank() || selectedVideoUri != null
+            val canStartDubbing = isUserLoggedIn && !isExpired && !isProcessing && hasSource && geminiKey.isNotBlank()
 
             Button(
                 onClick = {
@@ -940,10 +1113,11 @@ fun RecapStudioScreen(
                         return@Button
                     }
                     try {
+                        val finalSource = selectedVideoUri?.toString() ?: urlInput.trim()
                         onStartPipeline(
                             PipelineParams(
                                 action         = "DUB",
-                                url            = urlInput.trim(),
+                                url            = finalSource,
                                 geminiKey      = geminiKey.trim(),
                                 voiceProfileId = selectedProfile.id,
                                 ttsEngine      = selectedProfile.engine.id,

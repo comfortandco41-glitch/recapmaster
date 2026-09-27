@@ -83,6 +83,10 @@ class RecapPipelineService : Service() {
             dubbingMode: String = "STORY_RECAP"
         ) = Intent(context, RecapPipelineService::class.java).apply {
             this.action = ACTION_START
+            if (url.startsWith("content://")) {
+                data = android.net.Uri.parse(url)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
             putExtra(EXTRA_ACTION,           action)
             putExtra(EXTRA_URL,              url)
             putExtra(EXTRA_GEMINI_KEY,       geminiKey)

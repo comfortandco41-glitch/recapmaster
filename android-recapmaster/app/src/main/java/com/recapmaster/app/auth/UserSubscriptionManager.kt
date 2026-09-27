@@ -31,6 +31,13 @@ data class UserSubscription(
             return System.currentTimeMillis() > expiresAtMs
         }
 
+    val isMaxRewardReached: Boolean
+        get() {
+            if (isAdmin) return false
+            val diff = expiresAtMs - System.currentTimeMillis()
+            return diff >= 24 * 60 * 60 * 1000L
+        }
+
     val remainingDays: Long
         get() {
             if (isAdmin) return 9999L
@@ -278,10 +285,13 @@ object UserSubscriptionManager {
         }
     }
 
+    const val MAX_REWARD_EXTEND_MS: Long = 24 * 60 * 60 * 1000L // 24-hour maximum extension limit
+
     /**
      * Called when user finishes watching a Rewarded Ad.
      * Grants [minutes] (default 10 mins free use).
-     * If already active, it stacks on top of remaining time.
+     * If already active, it stacks on top of remaining time up to a strict MAXIMUM of 24 hours from now.
+     * Strictly prevents fraud, bots, or scammers from stacking months/years of access.
      */
     fun grantAdRewardMinutes(user: FirebaseUser?, minutes: Long = 10, onComplete: ((Boolean) -> Unit)? = null) {
         if (user == null) {
@@ -290,12 +300,22 @@ object UserSubscriptionManager {
         }
         val currentSub = _subscription.value
         val now = System.currentTimeMillis()
+
+        // 🛑 Anti-Fraud Check: If user already has 24h or more remaining, disallow further stacking
+        if (currentSub != null && !currentSub.isAdmin && (currentSub.expiresAtMs - now) >= MAX_REWARD_EXTEND_MS) {
+            onComplete?.invoke(false)
+            return
+        }
+
         val baseTime = if (currentSub != null && !currentSub.isExpired && currentSub.expiresAtMs > now) {
             currentSub.expiresAtMs
         } else {
             now
         }
-        val newExpiry = baseTime + (minutes * 60 * 1000L)
+
+        val targetExpiry = baseTime + (minutes * 60 * 1000L)
+        val maxAllowedExpiry = now + MAX_REWARD_EXTEND_MS
+        val newExpiry = if (currentSub?.isAdmin == true) targetExpiry else targetExpiry.coerceAtMost(maxAllowedExpiry)
         val dateStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date(newExpiry))
 
         val updates = hashMapOf<String, Any>(
