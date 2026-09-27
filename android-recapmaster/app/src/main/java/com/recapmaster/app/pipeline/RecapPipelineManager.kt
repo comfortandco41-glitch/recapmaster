@@ -225,7 +225,7 @@ class RecapPipelineManager(private val context: Context) {
                 val narrationScript = geminiClient.generateRecapScript(
                     burmeseTranscript = burmeseTranscript,
                     videoDurationSeconds = videoDuration,
-                    videoTitle = downloadRes.title
+                    videoTitle = videoTitle
                 )
                 val dialogueText = extractAllDialogueTexts(burmeseTranscript)
                 val scriptToDub = if (narrationScript.isNotBlank() && narrationScript.length >= 40) {
