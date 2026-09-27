@@ -24,7 +24,7 @@ object AdsterraAdsManager {
     private const val TAG = "AdsterraAdsManager"
 
     // Default Adsterra Smartlink (can be updated anytime via Firebase Firestore "app_config/ads" -> "adsterra_direct_link")
-    var directLinkUrl: String = "http://apointmrnet35.top/h/yCvbKf7BKyRC/4cf365a219af4084bcb33aee33f6e0bb/V6Qv4V4mo8aTLVf91QkAh8"
+    var directLinkUrl: String = "https://www.profitableratecpmnetwork.com/xpas1uub?key=aadcd94e2c1bb0ab342e0f1fee4a771d"
 
     private var isListenerInitialized = false
     private var isWaitingForReward = false
