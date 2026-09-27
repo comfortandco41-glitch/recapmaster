@@ -85,13 +85,13 @@ class MainActivity : ComponentActivity() {
                 color = Color(0xFF09090B)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // 📱 Top Banner Ad (Start.io)
+                    // 📱 Top Banner Ad (Adsterra 468x60 Banner)
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
+                            .height(60.dp),
                         factory = { ctx ->
-                            com.recapmaster.app.ads.StartAppAdsManager.createBannerView(ctx)
+                            com.recapmaster.app.ads.AdsterraBannerView.createTopBannerView(ctx)
                         }
                     )
 
@@ -101,13 +101,13 @@ class MainActivity : ComponentActivity() {
                             onStartPipeline = { params -> startPipelineSafely(params) }
                         )
                     }
-                    // 📱 Bottom Banner Ad (Start.io)
+                    // 📱 Bottom Banner Ad (Adsterra Container Banner)
                     AndroidView(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(50.dp),
+                            .height(60.dp),
                         factory = { ctx ->
-                            com.recapmaster.app.ads.StartAppAdsManager.createBannerView(ctx)
+                            com.recapmaster.app.ads.AdsterraBannerView.createBottomBannerView(ctx)
                         }
                     )
 
