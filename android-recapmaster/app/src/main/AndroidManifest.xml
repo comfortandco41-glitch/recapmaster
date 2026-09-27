@@ -43,13 +43,6 @@
             </intent-filter>
         </activity>
 
-        <!-- In-App Sponsor Ad Activity with 5-Second Countdown Timer -->
-        <activity
-            android:name=".ads.AdsterraRewardActivity"
-            android:exported="false"
-            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden"
-            android:theme="@style/Theme.RecapMaster" />
-
         <!-- Foreground service that runs the full AI pipeline (required on Android 8+/14) -->
         <service
             android:name=".RecapPipelineService"

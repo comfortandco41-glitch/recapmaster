@@ -7,25 +7,28 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.browser.customtabs.CustomTabColorSchemeParams
 import androidx.browser.customtabs.CustomTabsIntent
-import androidx.core.content.ContextCompat
 import com.google.firebase.firestore.FirebaseFirestore
 
 /**
  * AdsterraAdsManager handles Adsterra Direct Link (Smartlink) monetization.
- * - Opens the high-CPM Adsterra direct link using Chrome Custom Tabs for a seamless in-app experience.
+ * - Opens the high-CPM Adsterra direct link using Chrome Custom Tabs for a native browser experience.
+ *   (Raw WebViews are blocked by Adsterra anti-bot systems, leading to black screens / 403 errors).
+ * - Enforces a strict 5-SECOND MINIMUM STAY rule: If user closes the ad in < 5s, no reward is granted.
  * - Automatically fetches updated links from Firebase Firestore (app_config/ads -> adsterra_direct_link)
  *   so the developer can update/rotate links without rebuilding the APK.
- * - Grants the +10 minutes reward when the user returns to the app.
  */
 object AdsterraAdsManager {
     private const val TAG = "AdsterraAdsManager"
 
-    // Default Adsterra Smartlink (can be overridden anytime via Firebase Firestore "app_config/ads")
+    // Default Adsterra Smartlink (can be updated anytime via Firebase Firestore "app_config/ads" -> "adsterra_direct_link")
     var directLinkUrl: String = "http://apointmrnet35.top/h/yCvbKf7BKyRC/4cf365a219af4084bcb33aee33f6e0bb/V6Qv4V4mo8aTLVf91QkAh8"
 
     private var isListenerInitialized = false
+    private var isWaitingForReward = false
+    private var launchTimestamp: Long = 0L
 
     /**
      * Initializes Firestore listener to fetch live Adsterra direct link URL dynamically.
@@ -54,10 +57,8 @@ object AdsterraAdsManager {
         }
     }
 
-    private var onRewardGrantedCallback: (() -> Unit)? = null
-
     /**
-     * Launches the Adsterra Smartlink via AdsterraRewardActivity (with 5-second countdown timer).
+     * Opens the Adsterra Smartlink via Chrome Custom Tabs with a strict 5-second minimum stay verification.
      */
     fun showRewardedAd(
         activity: Activity,
@@ -74,42 +75,83 @@ object AdsterraAdsManager {
             return
         }
 
-        onStatusUpdate?.invoke("⏳ Opening sponsor ad (5s countdown)...")
-        onRewardGrantedCallback = onUserRewarded
+        launchTimestamp = System.currentTimeMillis()
+        isWaitingForReward = true
 
-        try {
-            val intent = Intent(activity, AdsterraRewardActivity::class.java).apply {
-                putExtra(AdsterraRewardActivity.EXTRA_URL, targetUrl)
-                putExtra(AdsterraRewardActivity.EXTRA_COUNTDOWN_SECONDS, 5)
+        onStatusUpdate?.invoke("⏳ Opening sponsor ad... Please stay on the page for at least 5 seconds!")
+
+        val lifecycleCallback = object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(act: Activity) {
+                if (act == activity && isWaitingForReward) {
+                    isWaitingForReward = false
+                    act.application.unregisterActivityLifecycleCallbacks(this)
+
+                    val elapsedMs = System.currentTimeMillis() - launchTimestamp
+                    val elapsedSeconds = elapsedMs / 1000L
+
+                    Log.d(TAG, "User returned from ad after ${elapsedMs}ms (${elapsedSeconds}s)")
+
+                    if (elapsedSeconds >= 5) {
+                        act.runOnUiThread {
+                            onStatusUpdate?.invoke("🎉 Sponsor ad viewed for ${elapsedSeconds}s! Granting +10 minutes reward...")
+                            Toast.makeText(act, "🎉 +10 Minutes reward added! (အခမဲ့ ၁၀ မိနစ် ပေါင်းထည့်ပြီးပါပြီ)", Toast.LENGTH_SHORT).show()
+                            onUserRewarded()
+                        }
+                    } else {
+                        act.runOnUiThread {
+                            val msg = "⚠️ ကျေးဇူးပြု၍ ကြော်ငြာကို အနည်းဆုံး ၅ စက္ကန့် ကြည့်ရှုပေးပါ (${elapsedSeconds}s သာ ကြည့်ရှုထားပါသည်)။"
+                            onStatusUpdate?.invoke(msg)
+                            Toast.makeText(act, msg, Toast.LENGTH_LONG).show()
+                            onDismissed?.invoke()
+                        }
+                    }
+                }
             }
-            activity.startActivity(intent)
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to start AdsterraRewardActivity, falling back to Custom Tabs", e)
-            try {
-                val uri = Uri.parse(targetUrl)
-                val customTabsIntent = CustomTabsIntent.Builder().build()
-                customTabsIntent.launchUrl(activity, uri)
-                // Fallback grant
-                onUserRewarded()
-            } catch (err: Exception) {
-                onRewardGrantedCallback = null
-                onFailed?.invoke("Could not open ad link: ${err.message}")
+
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(act: Activity) {
+                if (act == activity) {
+                    act.application.unregisterActivityLifecycleCallbacks(this)
+                }
             }
         }
-    }
 
-    /**
-     * Called by AdsterraRewardActivity when the user completes the 5-second countdown and claims the reward.
-     */
-    fun notifyRewardClaimed() {
-        onRewardGrantedCallback?.invoke()
-        onRewardGrantedCallback = null
-    }
+        activity.application.registerActivityLifecycleCallbacks(lifecycleCallback)
 
-    /**
-     * Called if user quits early.
-     */
-    fun cancelPendingReward() {
-        onRewardGrantedCallback = null
+        try {
+            val uri = Uri.parse(targetUrl)
+
+            // Configure Dark Theme Chrome Custom Tabs
+            val darkParams = CustomTabColorSchemeParams.Builder()
+                .setToolbarColor(0xFF18181B.toInt())
+                .build()
+
+            val customTabsIntent = CustomTabsIntent.Builder()
+                .setDefaultColorSchemeParams(darkParams)
+                .setShowTitle(true)
+                .setUrlBarHidingEnabled(false)
+                .build()
+
+            customTabsIntent.launchUrl(activity, uri)
+        } catch (e: Exception) {
+            Log.w(TAG, "Chrome Custom Tabs failed, falling back to standard ACTION_VIEW", e)
+            try {
+                val fallbackIntent = Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                activity.startActivity(fallbackIntent)
+            } catch (err: Exception) {
+                Log.e(TAG, "Failed to open Adsterra direct link", err)
+                isWaitingForReward = false
+                activity.application.unregisterActivityLifecycleCallbacks(lifecycleCallback)
+                activity.runOnUiThread {
+                    onFailed?.invoke("Could not open ad link: ${err.message}")
+                }
+            }
+        }
     }
 }
