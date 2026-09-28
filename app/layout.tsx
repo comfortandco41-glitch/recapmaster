@@ -22,6 +22,21 @@ export default function RootLayout({
       <body className="min-h-screen bg-[#060813] text-zinc-100 antialiased selection:bg-cyan-500 selection:text-zinc-950">
         {children}
         
+        {/* Google Analytics Tag */}
+        <Script
+          src="https://www.googletagmanager.com/gtag/js?id=G-R08TJ1HS68"
+          strategy="afterInteractive"
+        />
+        <Script id="google-analytics" strategy="afterInteractive">
+          {`
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+
+            gtag('config', 'G-R08TJ1HS68');
+          `}
+        </Script>
+
         {/* Global CPM Network Ad Script */}
         <Script
           src="https://pl31547639.profitableratecpmnetwork.com/4c/9c/bc/4c9cbcdae291d4cc736f691a30a3ec3e.js"
