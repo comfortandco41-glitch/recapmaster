@@ -9,12 +9,34 @@ export const dynamic = "force-dynamic";
 
 function getYtDlpPath(): string | null {
   const isWin = process.platform === "win32";
-  const binaryName = isWin ? "yt-dlp.exe" : "yt-dlp";
+  const binaryName = isWin ? "yt-dlp.exe" : "yt-dlp-linux";
   const localBin = path.join(process.cwd(), "bin", binaryName);
+
   if (fs.existsSync(localBin)) {
+    if (!isWin) {
+      const tmpBin = "/tmp/yt-dlp";
+      try {
+        if (!fs.existsSync(tmpBin) || fs.statSync(tmpBin).size !== fs.statSync(localBin).size) {
+          fs.copyFileSync(localBin, tmpBin);
+          fs.chmodSync(tmpBin, 0o755);
+        }
+        return tmpBin;
+      } catch (err) {
+        console.warn("Failed to copy yt-dlp to /tmp, using localBin:", err);
+      }
+    }
     return localBin;
   }
-  return null;
+
+  // Fallback to system yt-dlp on Linux / Docker / Hugging Face
+  return isWin ? null : "yt-dlp";
+}
+
+function getSpawnParams(binaryPath: string, args: string[]): { cmd: string; fullArgs: string[] } {
+  if (process.platform !== "win32" && !binaryPath.endsWith(".exe")) {
+    return { cmd: "python3", fullArgs: [binaryPath, ...args] };
+  }
+  return { cmd: binaryPath, fullArgs: args };
 }
 
 async function fetchOEmbedMetadata(url: string, videoId?: string) {
@@ -34,7 +56,7 @@ async function fetchOEmbedMetadata(url: string, videoId?: string) {
   }
 }
 
-// POST /api/youtube - Fetch video info (100% resilient on Vercel Serverless)
+// POST /api/youtube - Fetch video info
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -52,11 +74,11 @@ export async function POST(request: NextRequest) {
     const canonicalUrl = validation.canonicalUrl || url;
     const videoId = validation.videoId || "";
 
-    // 1. Try local yt-dlp binary if available (e.g. Local machine or VPS)
+    // 1. Try yt-dlp binary (Windows exe or Linux binary)
     const binary = getYtDlpPath();
     if (binary) {
       try {
-        const args = [
+        const rawArgs = [
           "--extractor-args",
           "youtube:player_client=ios,android,web",
           "--dump-json",
@@ -64,8 +86,9 @@ export async function POST(request: NextRequest) {
           "--no-check-certificates",
           canonicalUrl,
         ];
+        const { cmd, fullArgs } = getSpawnParams(binary, rawArgs);
 
-        const proc = spawn(binary, args);
+        const proc = spawn(cmd, fullArgs);
         let stdoutData = "";
         let stderrData = "";
 
@@ -92,16 +115,16 @@ export async function POST(request: NextRequest) {
           });
         }
       } catch (ytErr) {
-        console.warn("Local yt-dlp failed, falling back to oEmbed:", ytErr);
+        console.warn("yt-dlp execution error, falling back to oEmbed:", ytErr);
       }
     }
 
-    // 2. Serverless Cloud Fallback (Vercel): Pure HTTP oEmbed (Zero external binary, never blocked)
+    // 2. Fallback to official Google oEmbed (works on any cloud environment)
     const oembed = await fetchOEmbedMetadata(canonicalUrl, videoId);
     if (oembed) {
       return NextResponse.json({
         success: true,
-        hasYtDlp: false,
+        hasYtDlp: true, // Allow user to attempt direct download
         videoId,
         title: oembed.title,
         duration: 0,
@@ -112,11 +135,11 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 3. Fallback with video ID
+    // 3. Fallback with basic Video ID
     if (videoId) {
       return NextResponse.json({
         success: true,
-        hasYtDlp: false,
+        hasYtDlp: true,
         videoId,
         title: `YouTube Video (${videoId})`,
         duration: 0,
@@ -137,7 +160,7 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET /api/youtube?url=... - Stream video stream (when running with yt-dlp)
+// GET /api/youtube?url=... - Stream direct MP4 into the browser
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
@@ -156,14 +179,14 @@ export async function GET(request: NextRequest) {
     if (!binary) {
       return NextResponse.json(
         {
-          error: "Cloud serverless environment does not support direct streaming due to platform execution limits. Please use the 1-Click download helper button or our Android App to import your video.",
+          error: "Direct stream downloader binary not available in this container. Please use the 1-click download button to load the file.",
           externalDownloadUrl: `https://y2mate.is/watch?v=${validation.videoId}`,
         },
         { status: 501 }
       );
     }
 
-    const args = [
+    const rawArgs = [
       "--extractor-args",
       "youtube:player_client=ios,android,web",
       "-f",
@@ -175,10 +198,18 @@ export async function GET(request: NextRequest) {
       validation.canonicalUrl || rawUrl,
     ];
 
-    const proc = spawn(binary, args);
+    const { cmd, fullArgs } = getSpawnParams(binary, rawArgs);
+    const proc = spawn(cmd, fullArgs);
 
     proc.on("error", (err) => {
       console.warn("yt-dlp stream spawn error:", err.message);
+    });
+
+    proc.stderr.on("data", (chunk) => {
+      const msg = chunk.toString();
+      if (msg.includes("ERROR")) {
+        console.error("yt-dlp stream error:", msg);
+      }
     });
 
     const webStream = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;

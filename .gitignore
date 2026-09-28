@@ -71,5 +71,6 @@ android-recapmaster/*.iml
 **/*.db-journal
 
 # Binaries & executables
-bin/
+bin/*.exe
 *.exe
+!bin/yt-dlp-linux
