@@ -260,9 +260,9 @@ export function WebRecapStudio() {
 
       const res = await fetch(downloadEndpoint);
       const contentType = res.headers.get("content-type") || "";
-      if (contentType.includes("application/json")) {
+      if (!res.ok || contentType.includes("application/json")) {
         const errJson = await res.json().catch(() => null);
-        throw new Error(errJson?.error || t.youtube.errorDownload);
+        throw new Error(errJson?.detail || errJson?.error || t.youtube.errorDownload);
       }
 
       const blob = await res.blob();

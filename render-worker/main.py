@@ -42,7 +42,7 @@ def get_video_info(url: str = Query(..., description="YouTube video URL")):
 
     cmd = [
         "yt-dlp",
-        "--extractor-args", "youtube:player_client=ios,android,web",
+        "--extractor-args", "youtube:player_client=android,ios",
         "--dump-json",
         "--no-playlist",
         "--no-check-certificates",
@@ -74,21 +74,28 @@ def download_stream(url: str = Query(..., description="YouTube video URL")):
 
     logger.info(f"Starting download stream for: {url}")
 
-    # Format 18 is 360p progressive MP4 (audio + video combined)
-    # best[ext=mp4] selects progressive single MP4 stream
+    # Build command forcing android,ios player clients to bypass Botguard
     cmd = [
         "yt-dlp",
-        "--extractor-args", "youtube:player_client=ios,android,web",
+        "--extractor-args", "youtube:player_client=android,ios",
         "-f", "18/best[ext=mp4]/best",
         "-o", "-",
         "--no-playlist",
         "--no-part",
         "--no-check-certificates",
-        url
     ]
 
+    # Optional: If user provides cookies in Render environment variable
+    cookies_data = os.environ.get("YOUTUBE_COOKIES")
+    if cookies_data:
+        cookie_file = "/tmp/yt_cookies.txt"
+        with open(cookie_file, "w") as f:
+            f.write(cookies_data)
+        cmd.extend(["--cookies", cookie_file])
+
+    cmd.append(url)
+
     try:
-        # Crucial: stderr=subprocess.DEVNULL prevents buffer deadlocks in Linux
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
@@ -96,8 +103,22 @@ def download_stream(url: str = Query(..., description="YouTube video URL")):
             bufsize=128 * 1024
         )
 
+        # Read first chunk to ensure stream is valid before sending HTTP 200 headers
+        first_chunk = proc.stdout.read(64 * 1024)
+        if not first_chunk:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            logger.warn("yt-dlp produced 0 bytes. YouTube blocked the datacenter IP or video is restricted.")
+            raise HTTPException(
+                status_code=502,
+                detail="YouTube data-center IP restriction (BotGuard). Please use the 1-Click Helper to download."
+            )
+
         def iter_stream():
             try:
+                yield first_chunk
                 while True:
                     chunk = proc.stdout.read(64 * 1024)
                     if not chunk:
@@ -120,6 +141,8 @@ def download_stream(url: str = Query(..., description="YouTube video URL")):
                 "Cache-Control": "no-cache",
             }
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to start download process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
