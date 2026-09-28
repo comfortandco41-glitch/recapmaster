@@ -175,6 +175,14 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: validation.error || "Invalid video URL" }, { status: 400 });
     }
 
+    // If a dedicated worker (e.g. Render) is configured, redirect to it directly
+    const workerUrl = process.env.YOUTUBE_WORKER_URL || process.env.NEXT_PUBLIC_YOUTUBE_WORKER_URL;
+    if (workerUrl) {
+      const cleanWorker = workerUrl.replace(/\/+$/, "");
+      const target = validation.canonicalUrl || rawUrl;
+      return NextResponse.redirect(`${cleanWorker}/download?url=${encodeURIComponent(target)}`);
+    }
+
     const binary = getYtDlpPath();
     if (!binary) {
       return NextResponse.json(

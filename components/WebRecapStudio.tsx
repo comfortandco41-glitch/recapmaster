@@ -253,7 +253,12 @@ export function WebRecapStudio() {
 
     try {
       const targetUrl = youtubeInfo?.canonicalUrl || youtubeUrl.trim();
-      const res = await fetch(`/api/youtube?url=${encodeURIComponent(targetUrl)}`);
+      const workerUrl = process.env.NEXT_PUBLIC_YOUTUBE_WORKER_URL;
+      const downloadEndpoint = workerUrl
+        ? `${workerUrl.replace(/\/+$/, "")}/download?url=${encodeURIComponent(targetUrl)}`
+        : `/api/youtube?url=${encodeURIComponent(targetUrl)}`;
+
+      const res = await fetch(downloadEndpoint);
       const contentType = res.headers.get("content-type") || "";
       if (contentType.includes("application/json")) {
         const errJson = await res.json().catch(() => null);
