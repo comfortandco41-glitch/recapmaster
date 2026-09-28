@@ -185,6 +185,8 @@ export function WebRecapStudio() {
     thumbnail: string;
     channel: string;
     canonicalUrl: string;
+    hasYtDlp?: boolean;
+    externalDownloadUrl?: string;
   } | null>(null);
   const [youtubeError, setYoutubeError] = useState<string>("");
 
@@ -253,7 +255,8 @@ export function WebRecapStudio() {
       const targetUrl = youtubeInfo?.canonicalUrl || youtubeUrl.trim();
       const res = await fetch(`/api/youtube?url=${encodeURIComponent(targetUrl)}`);
       if (!res.ok) {
-        throw new Error(t.youtube.errorDownload);
+        const errData = await res.json().catch(() => null);
+        throw new Error(errData?.error || t.youtube.errorDownload);
       }
 
       const blob = await res.blob();
@@ -785,24 +788,56 @@ export function WebRecapStudio() {
                       </div>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={downloadAndLoadYoutubeVideo}
-                      disabled={youtubeDownloading}
-                      className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white shadow-ambient-glow transition-all flex items-center justify-center gap-2 disabled:opacity-50"
-                    >
-                      {youtubeDownloading ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>{t.youtube.downloading}</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="w-3.5 h-3.5" />
-                          <span>{t.youtube.downloadBtn}</span>
-                        </>
-                      )}
-                    </button>
+                    {youtubeInfo.hasYtDlp ? (
+                      <button
+                        type="button"
+                        onClick={downloadAndLoadYoutubeVideo}
+                        disabled={youtubeDownloading}
+                        className="w-full py-2.5 px-4 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white shadow-ambient-glow transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                      >
+                        {youtubeDownloading ? (
+                          <>
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                            <span>{t.youtube.downloading}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Download className="w-3.5 h-3.5" />
+                            <span>{t.youtube.downloadBtn}</span>
+                          </>
+                        )}
+                      </button>
+                    ) : (
+                      <div className="space-y-2.5 pt-1">
+                        <div className="p-2.5 rounded-xl bg-cyan-950/40 border border-cyan-500/30 text-[11px] text-cyan-200 leading-relaxed flex items-start gap-2">
+                          <Sparkles className="w-4 h-4 shrink-0 text-cyan-400 mt-0.5" />
+                          <span>
+                            {appLang === "my"
+                              ? "Cloud Serverless ပေါ်တွင် YouTube IP ကန့်သတ်ချက်ကြောင့် အောက်ပါခလုတ်မှ ဗီဒီယိုဖိုင်ကို ၁-Click ဖြင့် အလွယ်တကူ ရယူနိုင်ပါသည်။ (Android RecapMaster App တွင်မူ ဖုန်းထဲ၌ တိုက်ရိုက်ဒေါင်းလုဒ် ပါဝင်ပြီးဖြစ်ပါသည်)"
+                              : "Due to cloud serverless execution limits, click below to quickly download the MP4 file in 1-click and drop it into the Studio."}
+                          </span>
+                        </div>
+                        <div className="flex gap-2">
+                          <a
+                            href={youtubeInfo.externalDownloadUrl || `https://y2mate.is/watch?v=${youtubeInfo.videoId}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex-1 py-2.5 px-4 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white shadow-ambient-glow transition-all flex items-center justify-center gap-2 text-center"
+                          >
+                            <ExternalLink className="w-3.5 h-3.5" />
+                            <span>{appLang === "my" ? "MP4 ဖိုင် ရယူရန် (1-Click)" : "Download MP4 (1-Click)"}</span>
+                          </a>
+                          <button
+                            type="button"
+                            onClick={() => setInputMode("file")}
+                            className="py-2.5 px-4 rounded-xl text-xs font-semibold bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-white/[0.1] transition-all flex items-center justify-center gap-1.5 shrink-0"
+                          >
+                            <Upload className="w-3.5 h-3.5 text-cyan-400" />
+                            <span>{appLang === "my" ? "ဖိုင်တင်မည်" : "Upload"}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
