@@ -201,16 +201,66 @@ export async function GET(request: NextRequest) {
     const { cmd, fullArgs } = getSpawnParams(binary, rawArgs);
     const proc = spawn(cmd, fullArgs);
 
-    proc.on("error", (err) => {
-      console.warn("yt-dlp stream spawn error:", err.message);
+    let stderrOutput = "";
+    proc.stderr.on("data", (chunk) => {
+      stderrOutput += chunk.toString();
     });
 
-    proc.stderr.on("data", (chunk) => {
-      const msg = chunk.toString();
-      if (msg.includes("ERROR")) {
-        console.error("yt-dlp stream error:", msg);
-      }
+    // Wait for the first chunk of video data, error, or process exit
+    const firstChunk = await new Promise<Buffer | null>((resolve, reject) => {
+      let settled = false;
+
+      const onData = (chunk: Buffer) => {
+        if (!settled) {
+          settled = true;
+          proc.stdout.off("data", onData);
+          proc.off("error", onError);
+          proc.off("close", onClose);
+          resolve(chunk);
+        }
+      };
+
+      const onError = (err: Error) => {
+        if (!settled) {
+          settled = true;
+          proc.stdout.off("data", onData);
+          proc.off("error", onError);
+          proc.off("close", onClose);
+          reject(err);
+        }
+      };
+
+      const onClose = (code: number) => {
+        if (!settled) {
+          settled = true;
+          proc.stdout.off("data", onData);
+          proc.off("error", onError);
+          proc.off("close", onClose);
+          resolve(null);
+        }
+      };
+
+      proc.stdout.on("data", onData);
+      proc.on("error", onError);
+      proc.on("close", onClose);
+    }).catch((err) => {
+      console.warn("yt-dlp stream process failed to start:", err.message);
+      return null;
     });
+
+    if (!firstChunk) {
+      console.warn("yt-dlp produced no stream data. stderr:", stderrOutput.slice(-300));
+      return NextResponse.json(
+        {
+          error: "Cloud Serverless (Vercel) IP ကန့်သတ်ချက်ကြောင့် YouTube ဗီဒီယို stream ကို တိုက်ရိုက်ဆွဲ၍ မရနိုင်သေးပါ။ အောက်ပါ 1-Click Helper ဖြင့် ရယူနိုင်ပါသည်။",
+          externalDownloadUrl: `https://y2mate.is/watch?v=${validation.videoId}`,
+        },
+        { status: 502 }
+      );
+    }
+
+    // Put first chunk back into the stream
+    proc.stdout.unshift(firstChunk);
 
     const webStream = Readable.toWeb(proc.stdout) as ReadableStream<Uint8Array>;
 

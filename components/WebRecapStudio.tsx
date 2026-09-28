@@ -254,12 +254,21 @@ export function WebRecapStudio() {
     try {
       const targetUrl = youtubeInfo?.canonicalUrl || youtubeUrl.trim();
       const res = await fetch(`/api/youtube?url=${encodeURIComponent(targetUrl)}`);
-      if (!res.ok) {
-        const errData = await res.json().catch(() => null);
-        throw new Error(errData?.error || t.youtube.errorDownload);
+      const contentType = res.headers.get("content-type") || "";
+      if (contentType.includes("application/json")) {
+        const errJson = await res.json().catch(() => null);
+        throw new Error(errJson?.error || t.youtube.errorDownload);
       }
 
       const blob = await res.blob();
+      if (!blob || blob.size < 50000) {
+        throw new Error(
+          appLang === "my"
+            ? "Cloud Serverless (Vercel) ပေါ်တွင် YouTube BotGuard IP ကန့်သတ်ချက်ကြောင့် ဗီဒီယို တိုက်ရိုက်ဆွဲယူ၍ မရနိုင်သေးပါ။ အောက်ပါ 1-Click Helper ဖြင့် ရယူပြီး ဖိုင်တင်ပေးပါရန်။"
+            : "Direct stream was blocked or truncated by YouTube on cloud serverless IP. Please use the 1-click helper below to download the video."
+        );
+      }
+
       const rawTitle = youtubeInfo?.title || "youtube_video";
       const sanitizedTitle = rawTitle.replace(/[^a-zA-Z0-9_\-\s]/g, "").slice(0, 32).trim() || "youtube_video";
       const file = new File([blob], `${sanitizedTitle}.mp4`, { type: "video/mp4" });
