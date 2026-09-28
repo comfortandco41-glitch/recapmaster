@@ -846,6 +846,21 @@ export function WebRecapStudio() {
                           <ExternalLink className="w-3 h-3" />
                         </a>
                       </div>
+
+                      {youtubeError && (
+                        <div className="pt-2 border-t border-white/[0.08]">
+                          <label className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/[0.1] text-xs font-semibold text-cyan-300 hover:text-cyan-200 cursor-pointer transition">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>{appLang === "my" ? "ဒေါင်းလုဒ်ရရှိသော ဖိုင်တင်မည်" : "Upload Downloaded File"}</span>
+                            <input
+                              type="file"
+                              accept="video/*,audio/*"
+                              onChange={handleFileChange}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
