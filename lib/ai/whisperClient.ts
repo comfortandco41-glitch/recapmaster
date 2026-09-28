@@ -25,18 +25,46 @@ export async function getWhisperPipeline(onProgress?: (info: any) => void) {
   );
   const pipeline = transformers.pipeline;
 
-  // Allow WebGPU device detection
-  const hasWebGPU = typeof navigator !== "undefined" && "gpu" in navigator;
-  const device = hasWebGPU ? "webgpu" : "wasm";
+  // Check if WebGPU adapter is genuinely available on this device
+  let canUseWebGPU = false;
+  if (typeof navigator !== "undefined" && "gpu" in navigator) {
+    try {
+      const adapter = await (navigator as any).gpu.requestAdapter();
+      if (adapter) {
+        canUseWebGPU = true;
+      }
+    } catch {
+      canUseWebGPU = false;
+    }
+  }
 
-  console.log(`[Whisper Web] Initializing Whisper pipeline with device: ${device}`);
+  // 1. Try WebGPU if adapter is available
+  if (canUseWebGPU) {
+    try {
+      console.log("[Whisper Web] Attempting WebGPU initialization...");
+      transcriber = await pipeline(
+        "automatic-speech-recognition",
+        "onnx-community/whisper-tiny",
+        {
+          device: "webgpu",
+          dtype: "fp32",
+          progress_callback: onProgress,
+        }
+      );
+      return transcriber;
+    } catch (gpuErr: any) {
+      console.warn("[Whisper Web] WebGPU failed, falling back to WASM:", gpuErr?.message || gpuErr);
+    }
+  }
 
+  // 2. Safe WASM Fallback (100% compatible with Mobile Chrome, Android, iPhone Safari)
+  console.log("[Whisper Web] Initializing Whisper with CPU WASM fallback...");
   transcriber = await pipeline(
     "automatic-speech-recognition",
     "onnx-community/whisper-tiny",
     {
-      device: device as any,
-      dtype: device === "webgpu" ? "fp32" : "q8",
+      device: "wasm",
+      dtype: "q8",
       progress_callback: onProgress,
     }
   );
