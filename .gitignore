@@ -69,3 +69,7 @@ android-recapmaster/*.iml
 
 **/*.db
 **/*.db-journal
+
+# Binaries & executables
+bin/
+*.exe
