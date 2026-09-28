@@ -13,6 +13,7 @@ import com.recapmaster.app.data.gemini.GeminiTtsClient
 import com.recapmaster.app.data.model.VoiceProfile
 import com.recapmaster.app.data.model.VoiceProfiles
 import com.recapmaster.app.engine.BlurBoxConfig
+import com.recapmaster.app.engine.CopyrightBypassConfig
 import com.recapmaster.app.engine.FFmpegEngine
 import com.recapmaster.app.engine.SubtitleGenerator
 import com.recapmaster.app.engine.WhisperEngine
@@ -338,7 +339,8 @@ class RecapPipelineManager(private val context: Context) {
         fontScale: Float = 1.0f,
         marginV: Int = 30,
         playbackSpeed: Float = 1.0f,
-        blurBox: BlurBoxConfig = BlurBoxConfig()
+        blurBox: BlurBoxConfig = BlurBoxConfig(),
+        copyrightBypass: CopyrightBypassConfig = CopyrightBypassConfig()
     ) = withContext(Dispatchers.IO) {
         val workDir = activeWorkDir
         val sourceVideo = activeSourceVideo
@@ -354,7 +356,7 @@ class RecapPipelineManager(private val context: Context) {
             val finalVideo = File(workDir, "final_recap.mp4")
 
             // Video Composition with FFmpegKit (Subtitles removed)
-            log("🎬 Composing final recap video with watermark blur & audio mastering...", PipelineStage.COMPOSING_VIDEO, 0.92f)
+            log("🎬 Composing final recap video with anti-detection FX & audio mastering...", PipelineStage.COMPOSING_VIDEO, 0.92f)
             ffmpegEngine.renderFinalRecap(
                 sourceVideo = sourceVideo,
                 dubbedVoiceAudio = voiceAudio,
@@ -362,6 +364,7 @@ class RecapPipelineManager(private val context: Context) {
                 outputVideo = finalVideo,
                 playbackSpeed = playbackSpeed,
                 blurBox = blurBox,
+                copyrightBypass = copyrightBypass,
                 fontsDir = null,
                 soundStyle = soundStyle,
                 onProgress = { pct, msg ->
@@ -417,7 +420,8 @@ class RecapPipelineManager(private val context: Context) {
         fontScale: Float = 1.0f,
         marginV: Int = 30,
         playbackSpeed: Float = 1.0f,
-        blurBox: BlurBoxConfig = BlurBoxConfig()
+        blurBox: BlurBoxConfig = BlurBoxConfig(),
+        copyrightBypass: CopyrightBypassConfig = CopyrightBypassConfig()
     ) = withContext(Dispatchers.IO) {
         startDubbingPipeline(videoUrl, geminiApiKey, voiceProfile, dubbingMode)
         if (_state.value.stage == PipelineStage.DUBBED_READY) {
@@ -428,7 +432,8 @@ class RecapPipelineManager(private val context: Context) {
                 fontScale = fontScale,
                 marginV = marginV,
                 playbackSpeed = playbackSpeed,
-                blurBox = blurBox
+                blurBox = blurBox,
+                copyrightBypass = copyrightBypass
             )
         }
     }

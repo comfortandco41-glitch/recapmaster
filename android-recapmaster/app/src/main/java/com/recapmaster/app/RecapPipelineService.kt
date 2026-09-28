@@ -15,6 +15,7 @@ import com.recapmaster.app.data.model.TtsEngine
 import com.recapmaster.app.data.model.VoiceProfile
 import com.recapmaster.app.data.model.VoiceProfiles
 import com.recapmaster.app.engine.BlurBoxConfig
+import com.recapmaster.app.engine.CopyrightBypassConfig
 import com.recapmaster.app.pipeline.RecapPipelineManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,6 +61,15 @@ class RecapPipelineService : Service() {
         const val EXTRA_BLUR_H          = "blur_h"
         const val EXTRA_BLUR_STRENGTH   = "blur_strength"
         const val EXTRA_DUBBING_MODE    = "dubbing_mode"
+        const val EXTRA_BYPASS_ENABLED     = "bypass_enabled"
+        const val EXTRA_BYPASS_HFLIP       = "bypass_hflip"
+        const val EXTRA_BYPASS_ZOOM        = "bypass_zoom"
+        const val EXTRA_BYPASS_BRIGHTNESS  = "bypass_brightness"
+        const val EXTRA_BYPASS_CONTRAST    = "bypass_contrast"
+        const val EXTRA_BYPASS_SATURATION  = "bypass_saturation"
+        const val EXTRA_BYPASS_NOISE       = "bypass_noise"
+        const val EXTRA_BYPASS_BORDER_WIDTH = "bypass_border_width"
+        const val EXTRA_BYPASS_BORDER_COLOR = "bypass_border_color"
 
         fun buildStartIntent(
             context: Context,
@@ -80,7 +90,16 @@ class RecapPipelineService : Service() {
             speed: Float = 1.0f,
             blurEnabled: Boolean = false,
             blurX: Float = 0.78f, blurY: Float = 0.04f, blurW: Float = 0.18f, blurH: Float = 0.08f, blurStrength: Int = 16,
-            dubbingMode: String = "STORY_RECAP"
+            dubbingMode: String = "STORY_RECAP",
+            bypassEnabled: Boolean = false,
+            bypassHflip: Boolean = false,
+            bypassZoom: Float = 0f,
+            bypassBrightness: Float = 0f,
+            bypassContrast: Float = 1.0f,
+            bypassSaturation: Float = 1.0f,
+            bypassNoise: Int = 0,
+            bypassBorderWidth: Int = 0,
+            bypassBorderColor: String = "#000000"
         ) = Intent(context, RecapPipelineService::class.java).apply {
             this.action = ACTION_START
             if (url.startsWith("content://")) {
@@ -109,6 +128,15 @@ class RecapPipelineService : Service() {
             putExtra(EXTRA_BLUR_H,           blurH)
             putExtra(EXTRA_BLUR_STRENGTH,    blurStrength)
             putExtra(EXTRA_DUBBING_MODE,     dubbingMode)
+            putExtra(EXTRA_BYPASS_ENABLED,      bypassEnabled)
+            putExtra(EXTRA_BYPASS_HFLIP,        bypassHflip)
+            putExtra(EXTRA_BYPASS_ZOOM,         bypassZoom)
+            putExtra(EXTRA_BYPASS_BRIGHTNESS,   bypassBrightness)
+            putExtra(EXTRA_BYPASS_CONTRAST,     bypassContrast)
+            putExtra(EXTRA_BYPASS_SATURATION,   bypassSaturation)
+            putExtra(EXTRA_BYPASS_NOISE,        bypassNoise)
+            putExtra(EXTRA_BYPASS_BORDER_WIDTH, bypassBorderWidth)
+            putExtra(EXTRA_BYPASS_BORDER_COLOR, bypassBorderColor)
         }
     }
 
@@ -160,6 +188,27 @@ class RecapPipelineService : Service() {
                 val blurH         = intent.getFloatExtra(EXTRA_BLUR_H, 0.08f)
                 val blurStrength  = intent.getIntExtra(EXTRA_BLUR_STRENGTH, 16)
                 val dubbingMode   = intent.getStringExtra(EXTRA_DUBBING_MODE) ?: "STORY_RECAP"
+                val bypassEnabled     = intent.getBooleanExtra(EXTRA_BYPASS_ENABLED, false)
+                val bypassHflip       = intent.getBooleanExtra(EXTRA_BYPASS_HFLIP, false)
+                val bypassZoom        = intent.getFloatExtra(EXTRA_BYPASS_ZOOM, 0f)
+                val bypassBrightness  = intent.getFloatExtra(EXTRA_BYPASS_BRIGHTNESS, 0f)
+                val bypassContrast    = intent.getFloatExtra(EXTRA_BYPASS_CONTRAST, 1.0f)
+                val bypassSaturation  = intent.getFloatExtra(EXTRA_BYPASS_SATURATION, 1.0f)
+                val bypassNoise       = intent.getIntExtra(EXTRA_BYPASS_NOISE, 0)
+                val bypassBorderWidth = intent.getIntExtra(EXTRA_BYPASS_BORDER_WIDTH, 0)
+                val bypassBorderColor = intent.getStringExtra(EXTRA_BYPASS_BORDER_COLOR) ?: "#000000"
+
+                val copyrightBypass = CopyrightBypassConfig(
+                    enabled         = bypassEnabled,
+                    hflip           = bypassHflip,
+                    zoomCropPct     = bypassZoom,
+                    brightness      = bypassBrightness,
+                    contrast        = bypassContrast,
+                    saturation      = bypassSaturation,
+                    noise           = bypassNoise,
+                    borderThickness = bypassBorderWidth,
+                    borderColorHex  = bypassBorderColor
+                )
 
                 if (pipelineAction != "COMPOSE" && url.isBlank()) {
                     stopForegroundAndSelf()
@@ -217,7 +266,8 @@ class RecapPipelineService : Service() {
                                         xPct     = blurX, yPct = blurY,
                                         wPct     = blurW, hPct = blurH,
                                         strength = blurStrength
-                                    )
+                                    ),
+                                    copyrightBypass   = copyrightBypass
                                 )
                             }
                             else -> {
@@ -237,7 +287,8 @@ class RecapPipelineService : Service() {
                                         xPct     = blurX, yPct = blurY,
                                         wPct     = blurW, hPct = blurH,
                                         strength = blurStrength
-                                    )
+                                    ),
+                                    copyrightBypass   = copyrightBypass
                                 )
                             }
                         }

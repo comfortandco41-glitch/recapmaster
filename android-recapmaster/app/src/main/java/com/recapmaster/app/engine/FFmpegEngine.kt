@@ -23,6 +23,18 @@ data class BlurBoxConfig(
     val strength: Int = 16
 )
 
+data class CopyrightBypassConfig(
+    val enabled: Boolean = false,
+    val hflip: Boolean = false,
+    val zoomCropPct: Float = 0f, // 0.0f to 0.30f (e.g. 0.05 = 5% zoom)
+    val brightness: Float = 0f, // -0.3f to +0.3f (0.0 = neutral)
+    val contrast: Float = 1.0f, // 0.6f to 1.4f (1.0 = neutral)
+    val saturation: Float = 1.0f, // 0.6f to 1.8f (1.0 = neutral)
+    val noise: Int = 0, // 0 to 30 (0 = off)
+    val borderThickness: Int = 0, // 0 to 40 px (0 = no border)
+    val borderColorHex: String = "#000000" // hex color like "#000000"
+)
+
 class FFmpegEngine(private val context: Context) {
 
     /**
@@ -375,6 +387,7 @@ class FFmpegEngine(private val context: Context) {
         outputVideo: File,
         playbackSpeed: Float = 1.0f,
         blurBox: BlurBoxConfig = BlurBoxConfig(),
+        copyrightBypass: CopyrightBypassConfig = CopyrightBypassConfig(),
         fontsDir: File? = null,
         soundStyle: String = "cinematic_recap",
         onProgress: ((progressPct: Float, message: String) -> Unit)? = null
@@ -385,6 +398,7 @@ class FFmpegEngine(private val context: Context) {
         val hasSpeed = kotlin.math.abs(speed - 1.0f) > 0.01f
         val hasBlur = blurBox.enabled
         val hasSubs = assSubtitleFile != null && assSubtitleFile.exists()
+        val hasBypass = copyrightBypass.enabled
         val audioEq = soundStyleAudioFilter(soundStyle)
 
         // ── Video filter chain ────────────────────────────────────────────
@@ -395,6 +409,61 @@ class FFmpegEngine(private val context: Context) {
             val f = String.format(java.util.Locale.US, "[%s]setpts=PTS/%.4f[v_speed]", currentV, speed)
             videoParts.add(f)
             currentV = "v_speed"
+        }
+
+        // ── Copyright Bypass Filters ──────────────────────────────────────
+        if (hasBypass) {
+            val (vidW, vidH) = getVideoDimensions(sourceVideo)
+
+            // 1. Horizontal Flip
+            if (copyrightBypass.hflip) {
+                videoParts.add("[$currentV]hflip[v_hflip]")
+                currentV = "v_hflip"
+            }
+
+            // 2. Center Zoom & Crop
+            if (copyrightBypass.zoomCropPct > 0.005f) {
+                val zoom = (1.0f + copyrightBypass.zoomCropPct).coerceIn(1.01f, 1.35f)
+                var cw = (vidW / zoom).toInt()
+                var ch = (vidH / zoom).toInt()
+                if (cw % 2 != 0) cw -= 1
+                if (ch % 2 != 0) ch -= 1
+                cw = cw.coerceAtLeast(16)
+                ch = ch.coerceAtLeast(16)
+                val cx = ((vidW - cw) / 2).coerceAtLeast(0)
+                val cy = ((vidH - ch) / 2).coerceAtLeast(0)
+                videoParts.add("[$currentV]crop=w=$cw:h=$ch:x=$cx:y=$cy,scale=$vidW:$vidH[v_zoom]")
+                currentV = "v_zoom"
+            }
+
+            // 3. Color Tuning (Brightness, Contrast, Saturation)
+            val b = copyrightBypass.brightness.coerceIn(-0.3f, 0.3f)
+            val c = copyrightBypass.contrast.coerceIn(0.5f, 1.5f)
+            val s = copyrightBypass.saturation.coerceIn(0.5f, 2.0f)
+            if (kotlin.math.abs(b) > 0.005f || kotlin.math.abs(c - 1.0f) > 0.01f || kotlin.math.abs(s - 1.0f) > 0.01f) {
+                val eqFilter = String.format(java.util.Locale.US, "eq=brightness=%.3f:contrast=%.3f:saturation=%.3f", b, c, s)
+                videoParts.add("[$currentV]$eqFilter[v_eq]")
+                currentV = "v_eq"
+            }
+
+            // 4. Digital Noise / Film Grain
+            if (copyrightBypass.noise > 0) {
+                val noiseVal = copyrightBypass.noise.coerceIn(1, 30)
+                videoParts.add("[$currentV]noise=alls=$noiseVal:allf=t+u[v_noise]")
+                currentV = "v_noise"
+            }
+
+            // 5. Border with Manual Color Selection
+            if (copyrightBypass.borderThickness > 0) {
+                var bw = copyrightBypass.borderThickness.coerceIn(2, (minOf(vidW, vidH) / 6))
+                if (bw % 2 != 0) bw += 1
+                val innerW = (vidW - 2 * bw).coerceAtLeast(16)
+                val innerH = (vidH - 2 * bw).coerceAtLeast(16)
+                val hex = copyrightBypass.borderColorHex.trim().removePrefix("#")
+                val colorArg = if (hex.length == 6 && hex.all { it.isDigit() || it in 'a'..'f' || it in 'A'..'F' }) "0x$hex" else "black"
+                videoParts.add("[$currentV]scale=$innerW:$innerH,pad=$vidW:$vidH:$bw:$bw:color=$colorArg[v_border]")
+                currentV = "v_border"
+            }
         }
 
         if (hasBlur) {
@@ -417,19 +486,18 @@ class FFmpegEngine(private val context: Context) {
             val by = (yPct * vidH).toInt().coerceIn(0, maxY)
 
             val str = blurBox.strength.coerceIn(3, 50)
-            val nextV = if (hasSubs) "v_blur" else "v_out"
             videoParts.add(
                 "[$currentV]split=2[v_base][v_crop];" +
                 "[v_crop]crop=w=$bw:h=$bh:x=$bx:y=$by,avgblur=sizeX=$str:sizeY=$str[v_blurred];" +
-                "[v_base][v_blurred]overlay=x=$bx:y=$by[$nextV]"
+                "[v_base][v_blurred]overlay=x=$bx:y=$by[v_blur]"
             )
-            currentV = nextV
+            currentV = "v_blur"
         }
 
         if (hasSubs) {
             val fontArg = if (fontsDir != null && fontsDir.exists()) ":fontsdir='${fontsDir.absolutePath}'" else ""
-            videoParts.add("[$currentV]ass='${assSubtitleFile!!.absolutePath}'$fontArg[v_out]")
-            currentV = "v_out"
+            videoParts.add("[$currentV]ass='${assSubtitleFile!!.absolutePath}'$fontArg[v_sub]")
+            currentV = "v_sub"
         }
 
         val hasVideoFilter = videoParts.isNotEmpty()

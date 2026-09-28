@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.recapmaster.app.engine.BlurBoxConfig
+import com.recapmaster.app.engine.CopyrightBypassConfig
 import com.recapmaster.app.pipeline.RecapPipelineManager
 import com.recapmaster.app.ui.screens.RecapStudioScreen
 import kotlinx.coroutines.Dispatchers
@@ -232,7 +233,16 @@ class MainActivity : ComponentActivity() {
             blurW            = params.blurW,
             blurH            = params.blurH,
             blurStrength     = params.blurStrength,
-            dubbingMode      = params.dubbingMode
+            dubbingMode      = params.dubbingMode,
+            bypassEnabled    = params.bypassEnabled,
+            bypassHflip      = params.bypassHflip,
+            bypassZoom       = params.bypassZoom,
+            bypassBrightness = params.bypassBrightness,
+            bypassContrast   = params.bypassContrast,
+            bypassSaturation = params.bypassSaturation,
+            bypassNoise      = params.bypassNoise,
+            bypassBorderWidth = params.bypassBorderWidth,
+            bypassBorderColor = params.bypassBorderColor
         )
 
         if (params.url.startsWith("content://")) {
@@ -281,6 +291,17 @@ class MainActivity : ComponentActivity() {
                                     xPct     = params.blurX, yPct = params.blurY,
                                     wPct     = params.blurW, hPct = params.blurH,
                                     strength = params.blurStrength
+                                ),
+                                copyrightBypass   = CopyrightBypassConfig(
+                                    enabled         = params.bypassEnabled,
+                                    hflip           = params.bypassHflip,
+                                    zoomCropPct     = params.bypassZoom,
+                                    brightness      = params.bypassBrightness,
+                                    contrast        = params.bypassContrast,
+                                    saturation      = params.bypassSaturation,
+                                    noise           = params.bypassNoise,
+                                    borderThickness = params.bypassBorderWidth,
+                                    borderColorHex  = params.bypassBorderColor
                                 )
                             )
                         }
@@ -307,6 +328,17 @@ class MainActivity : ComponentActivity() {
                                     xPct     = params.blurX, yPct = params.blurY,
                                     wPct     = params.blurW, hPct = params.blurH,
                                     strength = params.blurStrength
+                                ),
+                                copyrightBypass   = CopyrightBypassConfig(
+                                    enabled         = params.bypassEnabled,
+                                    hflip           = params.bypassHflip,
+                                    zoomCropPct     = params.bypassZoom,
+                                    brightness      = params.bypassBrightness,
+                                    contrast        = params.bypassContrast,
+                                    saturation      = params.bypassSaturation,
+                                    noise           = params.bypassNoise,
+                                    borderThickness = params.bypassBorderWidth,
+                                    borderColorHex  = params.bypassBorderColor
                                 )
                             )
                         }
@@ -385,5 +417,14 @@ data class PipelineParams(
     val blurX: Float = 0.78f, val blurY: Float = 0.04f,
     val blurW: Float = 0.18f, val blurH: Float = 0.08f,
     val blurStrength: Int = 16,
-    val dubbingMode: String = "STORY_RECAP" // Dedicated Story Recap Mode
+    val dubbingMode: String = "STORY_RECAP", // Dedicated Story Recap Mode
+    val bypassEnabled: Boolean = false,
+    val bypassHflip: Boolean = false,
+    val bypassZoom: Float = 0f,
+    val bypassBrightness: Float = 0f,
+    val bypassContrast: Float = 1.0f,
+    val bypassSaturation: Float = 1.0f,
+    val bypassNoise: Int = 0,
+    val bypassBorderWidth: Int = 0,
+    val bypassBorderColor: String = "#000000"
 )

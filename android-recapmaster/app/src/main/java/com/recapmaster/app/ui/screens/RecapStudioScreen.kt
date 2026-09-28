@@ -17,6 +17,10 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -63,6 +67,17 @@ private val GreenBg      = Color(0xFF064E3B)
 private val Red          = Color(0xFFF87171)
 private val RedBg        = Color(0xFF450A0A)
 private val Border       = Color(0xFF27272A)
+
+private val PRESET_BORDER_COLORS = listOf(
+    "#000000" to "Black",
+    "#FFFFFF" to "White",
+    "#F59E0B" to "Gold",
+    "#06B6D4" to "Cyan",
+    "#8B5CF6" to "Purple",
+    "#EF4444" to "Red",
+    "#10B981" to "Green",
+    "#0F172A" to "Navy"
+)
 private val TextPrimary  = Color(0xFFFAFAFA)
 private val TextSecondary= Color(0xFFA1A1AA)
 private val TextMuted    = Color(0xFF71717A)
@@ -242,6 +257,18 @@ fun RecapStudioScreen(
 
     // Speed
     var playbackSpeed  by remember { mutableFloatStateOf(1.0f) }
+
+    // Copyright Bypass & Anti-Detection FX
+    var bypassEnabled     by remember { mutableStateOf(false) }
+    var bypassHflip       by remember { mutableStateOf(false) }
+    var bypassZoom        by remember { mutableFloatStateOf(0f) }
+    var bypassBrightness  by remember { mutableFloatStateOf(0f) }
+    var bypassContrast    by remember { mutableFloatStateOf(1.0f) }
+    var bypassSaturation  by remember { mutableFloatStateOf(1.0f) }
+    var bypassNoise       by remember { mutableIntStateOf(0) }
+    var bypassBorderWidth by remember { mutableIntStateOf(0) }
+    var bypassBorderColor by remember { mutableStateOf("#000000") }
+    var customHexInput    by remember { mutableStateOf("#000000") }
 
     val isDubbing = pipelineState.stage == PipelineStage.DOWNLOADING ||
             pipelineState.stage == PipelineStage.EXTRACTING_AUDIO ||
@@ -1347,6 +1374,18 @@ fun RecapStudioScreen(
                         color = TextSecondary
                     )
 
+                    val parsedBorderColor = remember(bypassBorderColor) {
+                        try {
+                            val cleanHex = if (bypassBorderColor.startsWith("#")) bypassBorderColor else "#$bypassBorderColor"
+                            Color(android.graphics.Color.parseColor(cleanHex))
+                        } catch (_: Throwable) {
+                            Color.Black
+                        }
+                    }
+                    val previewBorderDp = if (bypassEnabled && bypassBorderWidth > 0) {
+                        (bypassBorderWidth / 3).coerceIn(2, 14).dp
+                    } else 0.dp
+
                     // ── INTERACTIVE LIVE PREVIEW BOX WITH REAL-TIME OVERLAYS ──
                     Box(
                         modifier = Modifier
@@ -1354,6 +1393,11 @@ fun RecapStudioScreen(
                             .height(240.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(Color.Black)
+                            .then(
+                                if (previewBorderDp > 0.dp) {
+                                    Modifier.border(previewBorderDp, parsedBorderColor, RoundedCornerShape(12.dp))
+                                } else Modifier
+                            )
                     ) {
                         if (exoPlayer != null) {
                             AndroidView(
@@ -1363,11 +1407,35 @@ fun RecapStudioScreen(
                                         useController = true
                                     }
                                 },
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        scaleX = (if (bypassEnabled && bypassHflip) -1f else 1f) * (if (bypassEnabled) 1f + bypassZoom else 1f)
+                                        scaleY = if (bypassEnabled) 1f + bypassZoom else 1f
+                                    }
                             )
                         } else {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                                 Text("Video player unavailable", color = TextMuted, fontSize = 12.sp)
+                            }
+                        }
+
+                        // Anti-Copyright Active Badge on Preview
+                        if (bypassEnabled) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = Color.Black.copy(alpha = 0.75f),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Cyan),
+                                modifier = Modifier.padding(8.dp).align(Alignment.TopStart)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text("🛡️", fontSize = 10.sp)
+                                    Text("Bypass FX Active", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                }
                             }
                         }
 
@@ -1393,6 +1461,273 @@ fun RecapStudioScreen(
                                         fontSize = 9.sp,
                                         fontWeight = FontWeight.Bold
                                     )
+                                }
+                            }
+                        }
+                    }
+
+                    HorizontalDivider(color = Border)
+
+                    // ── Copyright Bypass & Anti-Detection FX Section ──
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text("🛡️ Copyright Bypass & Anti-Detection", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                Surface(shape = RoundedCornerShape(4.dp), color = Cyan.copy(alpha = 0.15f)) {
+                                    Text("NEW", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                }
+                            }
+                            Text("မူပိုင်ခွင့်စစ်ဆေးမှုကျော်လွှားရန် Flip, Zoom, Color, Noise & Border ချိန်ညှိမှုများ", fontSize = 10.sp, color = TextMuted)
+                        }
+                        Switch(
+                            checked = bypassEnabled,
+                            onCheckedChange = { bypassEnabled = it },
+                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Cyan)
+                        )
+                    }
+
+                    if (bypassEnabled) {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(BgCardAlt)
+                                .border(1.dp, Cyan.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                .padding(12.dp)
+                        ) {
+                            // Quick Presets Row
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        bypassHflip = true
+                                        bypassZoom = 0.05f
+                                        bypassBrightness = 0.03f
+                                        bypassContrast = 1.08f
+                                        bypassSaturation = 1.10f
+                                        bypassNoise = 8
+                                        bypassBorderWidth = 14
+                                        bypassBorderColor = "#000000"
+                                        customHexInput = "#000000"
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.5f)),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("⚡ Recommended Preset (အကြံပြုချက်)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                                OutlinedButton(
+                                    onClick = {
+                                        bypassHflip = false
+                                        bypassZoom = 0f
+                                        bypassBrightness = 0f
+                                        bypassContrast = 1.0f
+                                        bypassSaturation = 1.0f
+                                        bypassNoise = 0
+                                        bypassBorderWidth = 0
+                                        bypassBorderColor = "#000000"
+                                        customHexInput = "#000000"
+                                    },
+                                    shape = RoundedCornerShape(8.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text("🔄 Reset", fontSize = 10.sp)
+                                }
+                            }
+
+                            HorizontalDivider(color = Border.copy(alpha = 0.5f))
+
+                            // 1. Horizontal Flip
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("↔️ Horizontal Flip (ဘယ်ညာလှန်လှည့်ခြင်း)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                    Text("ရုပ်ရှင်ဘယ်ညာပြောင်းပြန်လှန်၍ Video Fingerprint ကို ဖြတ်တောက်မည်", fontSize = 9.sp, color = TextMuted)
+                                }
+                                Switch(
+                                    checked = bypassHflip,
+                                    onCheckedChange = { bypassHflip = it },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Cyan)
+                                )
+                            }
+
+                            // 2. Zoom & Crop
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("🔍 Center Zoom & Crop (အနားသတ်ဖြတ်တောက်ပြီးချဲ့ခြင်း)", fontSize = 11.sp, color = TextSecondary)
+                                    Text("+${(bypassZoom * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Cyan)
+                                }
+                                Slider(
+                                    value = bypassZoom,
+                                    onValueChange = { bypassZoom = it },
+                                    valueRange = 0f..0.25f,
+                                    steps = 24,
+                                    colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
+                                )
+                            }
+
+                            // 3. Brightness Adjustment
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("☀️ Brightness (အလင်းအမှောင်ချိန်ညှိမှု)", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${if (bypassBrightness >= 0) "+" else ""}${(bypassBrightness * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                }
+                                Slider(
+                                    value = bypassBrightness,
+                                    onValueChange = { bypassBrightness = it },
+                                    valueRange = -0.20f..0.20f,
+                                    steps = 39,
+                                    colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                                )
+                            }
+
+                            // 4. Contrast Adjustment
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("🌓 Contrast (အရောင်ပြတ်သားမှု)", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${String.format(java.util.Locale.US, "%.2f", bypassContrast)}×", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurpleLight)
+                                }
+                                Slider(
+                                    value = bypassContrast,
+                                    onValueChange = { bypassContrast = it },
+                                    valueRange = 0.80f..1.30f,
+                                    steps = 24,
+                                    colors = SliderDefaults.colors(thumbColor = PurpleLight, activeTrackColor = PurpleLight, inactiveTrackColor = Border)
+                                )
+                            }
+
+                            // 5. Saturation Adjustment
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("🎨 Saturation (အရောင်ရင့်ဖျော့မှု)", fontSize = 11.sp, color = TextSecondary)
+                                    Text("${String.format(java.util.Locale.US, "%.2f", bypassSaturation)}×", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
+                                }
+                                Slider(
+                                    value = bypassSaturation,
+                                    onValueChange = { bypassSaturation = it },
+                                    valueRange = 0.80f..1.40f,
+                                    steps = 29,
+                                    colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
+                                )
+                            }
+
+                            // 6. Noise / Film Grain
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("📺 Digital Noise Grain (လက်ဗွေဖျက် အစက်အပြောက်)", fontSize = 11.sp, color = TextSecondary)
+                                    Text(if (bypassNoise == 0) "Off" else "$bypassNoise", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (bypassNoise > 0) Cyan else TextMuted)
+                                }
+                                Slider(
+                                    value = bypassNoise.toFloat(),
+                                    onValueChange = { bypassNoise = it.toInt() },
+                                    valueRange = 0f..20f,
+                                    steps = 19,
+                                    colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
+                                )
+                            }
+
+                            // 7. Border Thickness & Manual Color Selection
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("🖼️ Border Thickness (ဘောင်အကျယ်)", fontSize = 11.sp, color = TextSecondary)
+                                    Text(if (bypassBorderWidth == 0) "No Border" else "$bypassBorderWidth px", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                }
+                                Slider(
+                                    value = bypassBorderWidth.toFloat(),
+                                    onValueChange = { bypassBorderWidth = it.toInt() },
+                                    valueRange = 0f..36f,
+                                    steps = 17,
+                                    colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                                )
+
+                                if (bypassBorderWidth > 0) {
+                                    Text("Border Color Palette & Manual Adjustment (ဘောင်အရောင်ရွေးချယ်ရန်)", fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+
+                                    // Palette circles
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        PRESET_BORDER_COLORS.forEach { (hex, name) ->
+                                            val c = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Throwable) { Color.Black }
+                                            val isSelected = bypassBorderColor.equals(hex, ignoreCase = true)
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(30.dp)
+                                                    .clip(CircleShape)
+                                                    .background(c)
+                                                    .border(
+                                                        width = if (isSelected) 2.5.dp else 1.dp,
+                                                        color = if (isSelected) Cyan else Border,
+                                                        shape = CircleShape
+                                                    )
+                                                    .clickable {
+                                                        bypassBorderColor = hex
+                                                        customHexInput = hex
+                                                    },
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                if (isSelected) {
+                                                    Icon(
+                                                        Icons.Default.Check,
+                                                        contentDescription = name,
+                                                        tint = if (hex == "#FFFFFF") Color.Black else Color.White,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Manual Hex Input with live swatch preview
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedTextField(
+                                            value = customHexInput,
+                                            onValueChange = { input ->
+                                                customHexInput = input
+                                                val clean = if (input.startsWith("#")) input else "#$input"
+                                                if (clean.length == 7) {
+                                                    try {
+                                                        android.graphics.Color.parseColor(clean)
+                                                        bypassBorderColor = clean
+                                                    } catch (_: Throwable) {}
+                                                }
+                                            },
+                                            label = { Text("Manual Color Hex (e.g. #FF5722)", fontSize = 10.sp) },
+                                            singleLine = true,
+                                            modifier = Modifier.weight(1f),
+                                            colors = textFieldColors(focusedBorderColor = Cyan),
+                                            textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                        )
+
+                                        // Swatch box
+                                        Box(
+                                            modifier = Modifier
+                                                .size(44.dp)
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(parsedBorderColor)
+                                                .border(1.5.dp, Border, RoundedCornerShape(8.dp))
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1559,7 +1894,16 @@ fun RecapStudioScreen(
                                         blurEnabled   = blurEnabled,
                                         blurX         = blurX, blurY = blurY,
                                         blurW         = blurW, blurH = blurH,
-                                        blurStrength  = blurStrength
+                                        blurStrength  = blurStrength,
+                                        bypassEnabled     = bypassEnabled,
+                                        bypassHflip       = bypassHflip,
+                                        bypassZoom        = bypassZoom,
+                                        bypassBrightness  = bypassBrightness,
+                                        bypassContrast    = bypassContrast,
+                                        bypassSaturation  = bypassSaturation,
+                                        bypassNoise       = bypassNoise,
+                                        bypassBorderWidth = bypassBorderWidth,
+                                        bypassBorderColor = bypassBorderColor
                                     )
                                 )
                             } catch (t: Throwable) {
