@@ -1,6 +1,7 @@
 import subprocess
 import json
 import logging
+import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -23,7 +24,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
+# Render health checks use HEAD or GET requests
+@app.api_route("/", methods=["GET", "HEAD"])
 def health_check():
     version = subprocess.getoutput("yt-dlp --version")
     return {
@@ -114,3 +116,8 @@ def download_stream(url: str = Query(..., description="YouTube video URL")):
     except Exception as e:
         logger.error(f"Failed to start download process: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
