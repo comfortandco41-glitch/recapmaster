@@ -43,6 +43,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
 import androidx.compose.ui.viewinterop.AndroidView
+import android.graphics.Paint as AndroidPaint
+import android.graphics.ColorMatrix as AndroidColorMatrix
+import android.graphics.ColorMatrixColorFilter as AndroidColorFilter
+import android.view.View
+import android.view.LayoutInflater
+import com.recapmaster.app.R
 import com.recapmaster.app.PipelineParams
 import com.recapmaster.app.data.model.TtsEngine
 import com.recapmaster.app.data.model.VoiceProfile
@@ -52,6 +58,25 @@ import com.recapmaster.app.pipeline.PipelineStage
 import com.recapmaster.app.pipeline.RecapPipelineManager
 import kotlinx.coroutines.launch
 import java.io.File
+
+// ── Color Matrix Generator for Real-Time Live Preview ─────────────────────────
+private fun buildBypassColorMatrix(brightness: Float, contrast: Float, saturation: Float): AndroidColorMatrix {
+    val cm = AndroidColorMatrix()
+    cm.setSaturation(saturation.coerceIn(0f, 3f))
+
+    val scale = contrast.coerceIn(0.1f, 3f)
+    val translate = (128f * (1f - scale)) + (brightness * 255f)
+
+    val cbMatrix = AndroidColorMatrix(floatArrayOf(
+        scale, 0f,    0f,    0f, translate,
+        0f,    scale, 0f,    0f, translate,
+        0f,    0f,    scale, 0f, translate,
+        0f,    0f,    0f,    1f, 0f
+    ))
+
+    cbMatrix.postConcat(cm)
+    return cbMatrix
+}
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 private val BgDeep       = Color(0xFF09090B)
@@ -280,6 +305,10 @@ fun RecapStudioScreen(
     val isDubbedReady = pipelineState.stage == PipelineStage.DUBBED_READY
     val isCompleted = pipelineState.stage == PipelineStage.COMPLETED
     val isProcessing = isDubbing || isComposing
+    val canRenderFinal = isUserLoggedIn && !isExpired && !isComposing
+    val inStudioMode = isDubbedReady || isComposing || isCompleted || pipelineState.dubbedPreviewUri != null || pipelineState.finalVideoUri != null
+    var studioTab by remember { mutableIntStateOf(0) }
+    var isPreviewMinimized by remember { mutableStateOf(false) }
 
     // Automatically load dubbed preview video into player when ready
     LaunchedEffect(pipelineState.dubbedPreviewUri) {
@@ -433,16 +462,950 @@ fun RecapStudioScreen(
                 )
             )
         },
+        bottomBar = {
+            if (inStudioMode) {
+                Surface(
+                    color = BgCard,
+                    tonalElevation = 8.dp,
+                    shadowElevation = 8.dp,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Border)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .navigationBarsPadding()
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        if (pipelineState.stage == PipelineStage.COMPLETED && pipelineState.finalVideoUri != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                OutlinedButton(
+                                    onClick = {
+                                        val intent = Intent(Intent.ACTION_VIEW).apply {
+                                            setDataAndType(pipelineState.finalVideoUri, "video/mp4")
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(Intent.createChooser(intent, "Open in..."))
+                                    },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Green),
+                                    border = androidx.compose.foundation.BorderStroke(1.5.dp, Green)
+                                ) {
+                                    Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Open Gallery", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+
+                                Button(
+                                    onClick = { pipelineManager.reset() },
+                                    modifier = Modifier.weight(1f).height(48.dp),
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Purple)
+                                ) {
+                                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("New Recap", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = {
+                                    if (!isUserLoggedIn) {
+                                        authMessage = "⚠️ Please sign in with your Google account first."
+                                        return@Button
+                                    }
+                                    if (isExpired) {
+                                        authMessage = "❌ Free access expired. Please watch an ad to get +10 minutes of free use."
+                                        return@Button
+                                    }
+                                    try {
+                                        exoPlayer?.pause()
+                                        onStartPipeline(
+                                            PipelineParams(
+                                                action        = "COMPOSE",
+                                                soundStyle    = soundStyle.value,
+                                                burnSubtitles = false,
+                                                speed         = playbackSpeed,
+                                                blurEnabled   = blurEnabled,
+                                                blurX         = blurX, blurY = blurY,
+                                                blurW         = blurW, blurH = blurH,
+                                                blurStrength  = blurStrength,
+                                                bypassEnabled     = bypassEnabled,
+                                                bypassHflip       = bypassHflip,
+                                                bypassZoom        = bypassZoom,
+                                                bypassBrightness  = bypassBrightness,
+                                                bypassContrast    = bypassContrast,
+                                                bypassSaturation  = bypassSaturation,
+                                                bypassNoise       = bypassNoise,
+                                                bypassBorderWidth = bypassBorderWidth,
+                                                bypassBorderColor = bypassBorderColor
+                                            )
+                                        )
+                                    } catch (t: Throwable) {
+                                        t.printStackTrace()
+                                    }
+                                },
+                                enabled = canRenderFinal,
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black, disabledContainerColor = Border)
+                            ) {
+                                if (isComposing) {
+                                    CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                                    Spacer(modifier = Modifier.width(10.dp))
+                                    Text("Rendering Final Video (FFmpeg)...", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                } else if (!isUserLoggedIn) {
+                                    Icon(Icons.Default.Lock, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("🔐 Sign In Required to Render", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                } else if (isExpired) {
+                                    Icon(Icons.Default.TimerOff, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("⛔ Access Expired — Contact Admin", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                } else {
+                                    Icon(Icons.Default.MovieCreation, contentDescription = null)
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text("🎬 2. Generate Final Video (ရုပ်ရှင်အပြီးသတ်ထုတ်ယူမည်)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        },
         containerColor = BgDeep
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
-        ) {
+        if (inStudioMode) {
+            val parsedBorderColor = remember(bypassBorderColor) {
+                try {
+                    val cleanHex = if (bypassBorderColor.startsWith("#")) bypassBorderColor else "#$bypassBorderColor"
+                    Color(android.graphics.Color.parseColor(cleanHex))
+                } catch (_: Throwable) {
+                    Color.Black
+                }
+            }
+            val previewBorderDp = if (bypassEnabled && bypassBorderWidth > 0) {
+                (bypassBorderWidth / 2.5f).coerceIn(3f, 18f).dp
+            } else 0.dp
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+            ) {
+                // Auth notification banner
+                AnimatedVisibility(visible = authMessage != null) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = BgCardAlt,
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(authMessage ?: "", fontSize = 11.sp, color = TextPrimary, modifier = Modifier.weight(1f))
+                            IconButton(onClick = { authMessage = null }, modifier = Modifier.size(20.dp)) {
+                                Icon(Icons.Default.Close, contentDescription = "Dismiss", tint = TextMuted, modifier = Modifier.size(12.dp))
+                            }
+                        }
+                    }
+                }
+
+                // ── 1. PINNED LIVE PREVIEW DOCK (FIXED AT TOP, NEVER SCROLLS OFF) ──
+                Card(
+                    shape = RoundedCornerShape(0.dp),
+                    colors = CardDefaults.cardColors(containerColor = BgCard),
+                    elevation = CardDefaults.cardElevation(4.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 6.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Surface(
+                                    shape = RoundedCornerShape(6.dp),
+                                    color = Cyan.copy(alpha = 0.15f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.4f))
+                                ) {
+                                    Text("🎬 Live Studio Preview", color = Cyan, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                }
+                                if (bypassEnabled) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Green.copy(alpha = 0.15f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Green.copy(alpha = 0.4f))
+                                    ) {
+                                        Text("🛡️ FX Active", color = Green, fontSize = 10.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                    }
+                                }
+                            }
+
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                IconButton(
+                                    onClick = { isPreviewMinimized = !isPreviewMinimized },
+                                    modifier = Modifier.size(28.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPreviewMinimized) Icons.Default.UnfoldMore else Icons.Default.UnfoldLess,
+                                        contentDescription = if (isPreviewMinimized) "Expand Video" else "Minimize Video",
+                                        tint = TextSecondary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+
+                                OutlinedButton(
+                                    onClick = { pipelineManager.reset() },
+                                    shape = RoundedCornerShape(6.dp),
+                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
+                                    modifier = Modifier.height(26.dp)
+                                ) {
+                                    Text("↺ New", fontSize = 10.sp)
+                                }
+                            }
+                        }
+
+                        // Preview Box with Solid Inset Framing Border
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(if (isPreviewMinimized) 115.dp else 210.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(if (previewBorderDp > 0.dp) parsedBorderColor else BgCardAlt)
+                                .then(
+                                    if (previewBorderDp > 0.dp) Modifier.border(1.dp, Border, RoundedCornerShape(10.dp)) else Modifier
+                                )
+                                .padding(previewBorderDp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .clip(RoundedCornerShape(if (previewBorderDp > 0.dp) 3.dp else 10.dp))
+                                    .background(Color.Black)
+                            ) {
+                                if (exoPlayer != null) {
+                                    AndroidView(
+                                        factory = { ctx ->
+                                            val pv = LayoutInflater.from(ctx).inflate(
+                                                R.layout.player_view_texture,
+                                                null,
+                                                false
+                                            ) as PlayerView
+                                            pv.player = exoPlayer
+                                            pv.useController = true
+                                            pv
+                                        },
+                                        update = { pv ->
+                                            pv.player = exoPlayer
+                                            if (bypassEnabled && (bypassBrightness != 0f || bypassContrast != 1f || bypassSaturation != 1f)) {
+                                                val cm = buildBypassColorMatrix(bypassBrightness, bypassContrast, bypassSaturation)
+                                                val paint = AndroidPaint().apply {
+                                                    colorFilter = AndroidColorFilter(cm)
+                                                }
+                                                pv.setLayerType(View.LAYER_TYPE_HARDWARE, paint)
+                                                pv.videoSurfaceView?.setLayerType(View.LAYER_TYPE_HARDWARE, paint)
+                                            } else {
+                                                pv.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                                                pv.videoSurfaceView?.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+                                            }
+                                        },
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .graphicsLayer {
+                                                scaleX = (if (bypassEnabled && bypassHflip) -1f else 1f) * (if (bypassEnabled) 1f + bypassZoom else 1f)
+                                                scaleY = if (bypassEnabled) 1f + bypassZoom else 1f
+                                            }
+                                    )
+                                } else {
+                                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                                        Text("Video player unavailable", color = TextMuted, fontSize = 12.sp)
+                                    }
+                                }
+
+                                // Active Bypass Badges
+                                if (bypassEnabled && !isPreviewMinimized) {
+                                    Surface(
+                                        shape = RoundedCornerShape(6.dp),
+                                        color = Color.Black.copy(alpha = 0.70f),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.5f)),
+                                        modifier = Modifier.padding(6.dp).align(Alignment.TopStart)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Text("🛡️", fontSize = 9.sp)
+                                            val summary = buildString {
+                                                if (bypassHflip) append("Flip ")
+                                                if (bypassZoom > 0f) append("Z:+${(bypassZoom * 100).toInt()}% ")
+                                                if (bypassBrightness != 0f) append("B:${if (bypassBrightness > 0) "+" else ""}${(bypassBrightness * 100).toInt()}% ")
+                                                if (bypassContrast != 1f) append("C:${String.format(java.util.Locale.US, "%.1f", bypassContrast)}x ")
+                                                if (bypassSaturation != 1f) append("S:${String.format(java.util.Locale.US, "%.1f", bypassSaturation)}x ")
+                                                if (bypassNoise > 0) append("N:${bypassNoise} ")
+                                                if (bypassBorderWidth > 0) append("Border:${bypassBorderWidth}px")
+                                            }.trim()
+                                            Text(if (summary.isEmpty()) "Bypass Active" else summary, color = Cyan, fontSize = 8.5.sp, fontWeight = FontWeight.SemiBold)
+                                        }
+                                    }
+                                }
+
+                                // Watermark Blur Box Overlay
+                                if (blurEnabled) {
+                                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                                        val leftPx = maxWidth * blurX
+                                        val topPx = maxHeight * blurY
+                                        val widthPx = maxWidth * blurW
+                                        val heightPx = maxHeight * blurH
+
+                                        Box(
+                                            modifier = Modifier
+                                                .offset(x = leftPx, y = topPx)
+                                                .size(width = widthPx, height = heightPx)
+                                                .background(Amber.copy(alpha = 0.3f))
+                                                .border(1.5.dp, Amber, RoundedCornerShape(4.dp))
+                                                .padding(4.dp)
+                                        ) {
+                                            Text(
+                                                text = "💧 Blur (${(blurW * 100).toInt()}%×${(blurH * 100).toInt()}%)",
+                                                color = Amber,
+                                                fontSize = 8.sp,
+                                                fontWeight = FontWeight.Bold
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 2. STUDIO TABS NAVIGATION ROW ──
+                Surface(
+                    color = BgCard,
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Border)
+                ) {
+                    ScrollableTabRow(
+                        selectedTabIndex = studioTab,
+                        containerColor = BgCard,
+                        contentColor = Cyan,
+                        edgePadding = 8.dp,
+                        divider = {}
+                    ) {
+                        listOf(
+                            "🛡️ Anti-Copyright" to 0,
+                            "💧 Watermark Blur" to 1,
+                            "🎵 Audio & Speed" to 2,
+                            "📋 Info & Logs" to 3
+                        ).forEach { (title, idx) ->
+                            Tab(
+                                selected = studioTab == idx,
+                                onClick = { studioTab = idx },
+                                text = {
+                                    Text(
+                                        title,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (studioTab == idx) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (studioTab == idx) Cyan else TextSecondary
+                                    )
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // ── 3. SCROLLABLE TAB CONTROLS (DIRECTLY BENEATH PREVIEW) ──
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 8.dp)
+                        .verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    when (studioTab) {
+                        0 -> {
+                            // ── TAB 0: Anti-Copyright Bypass Controls ──
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("🛡️ Copyright Bypass & Anti-Detection", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                                        Surface(shape = RoundedCornerShape(4.dp), color = Cyan.copy(alpha = 0.15f)) {
+                                            Text("NEW", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
+                                        }
+                                    }
+                                    Text("Flip, Zoom, Color, Noise & Border ချိန်ညှိမှုများ (Live Preview တိုက်ရိုက်ပြသပါသည်)", fontSize = 10.sp, color = TextMuted)
+                                }
+                                Switch(
+                                    checked = bypassEnabled,
+                                    onCheckedChange = { bypassEnabled = it },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Cyan)
+                                )
+                            }
+
+                            if (bypassEnabled) {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(BgCardAlt)
+                                        .border(1.dp, Cyan.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    // Quick Presets Row
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = {
+                                                bypassHflip = true
+                                                bypassZoom = 0.05f
+                                                bypassBrightness = 0.03f
+                                                bypassContrast = 1.08f
+                                                bypassSaturation = 1.10f
+                                                bypassNoise = 8
+                                                bypassBorderWidth = 14
+                                                bypassBorderColor = "#000000"
+                                                customHexInput = "#000000"
+                                            },
+                                            modifier = Modifier.weight(1f),
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.5f)),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("⚡ Recommended Preset", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                        }
+                                        OutlinedButton(
+                                            onClick = {
+                                                bypassHflip = false
+                                                bypassZoom = 0f
+                                                bypassBrightness = 0f
+                                                bypassContrast = 1.0f
+                                                bypassSaturation = 1.0f
+                                                bypassNoise = 0
+                                                bypassBorderWidth = 0
+                                                bypassBorderColor = "#000000"
+                                                customHexInput = "#000000"
+                                            },
+                                            shape = RoundedCornerShape(8.dp),
+                                            colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
+                                            border = androidx.compose.foundation.BorderStroke(1.dp, Border),
+                                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
+                                        ) {
+                                            Text("🔄 Reset", fontSize = 10.sp)
+                                        }
+                                    }
+
+                                    HorizontalDivider(color = Border.copy(alpha = 0.5f))
+
+                                    // 1. Horizontal Flip
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("↔️ Horizontal Flip (ဘယ်ညာလှန်လှည့်ခြင်း)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+                                            Text("ရုပ်ရှင်ဘယ်ညာပြောင်းပြန်လှန်၍ Video Fingerprint ကို ဖြတ်တောက်မည်", fontSize = 9.sp, color = TextMuted)
+                                        }
+                                        Switch(
+                                            checked = bypassHflip,
+                                            onCheckedChange = { bypassHflip = it },
+                                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Cyan)
+                                        )
+                                    }
+
+                                    // 2. Zoom & Crop
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("🔍 Center Zoom & Crop (အနားသတ်ဖြတ်တောက်ပြီးချဲ့ခြင်း)", fontSize = 11.sp, color = TextSecondary)
+                                            Text("+${(bypassZoom * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Cyan)
+                                        }
+                                        Slider(
+                                            value = bypassZoom,
+                                            onValueChange = { bypassZoom = it },
+                                            valueRange = 0f..0.25f,
+                                            steps = 24,
+                                            colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
+                                        )
+                                    }
+
+                                    // 3. Brightness Adjustment
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("☀️ Brightness (အလင်းအမှောင်ချိန်ညှိမှု)", fontSize = 11.sp, color = TextSecondary)
+                                            Text("${if (bypassBrightness >= 0) "+" else ""}${(bypassBrightness * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                        }
+                                        Slider(
+                                            value = bypassBrightness,
+                                            onValueChange = { bypassBrightness = it },
+                                            valueRange = -0.20f..0.20f,
+                                            steps = 39,
+                                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                                        )
+                                    }
+
+                                    // 4. Contrast Adjustment
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("🌓 Contrast (အရောင်ပြတ်သားမှု)", fontSize = 11.sp, color = TextSecondary)
+                                            Text("${String.format(java.util.Locale.US, "%.2f", bypassContrast)}×", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurpleLight)
+                                        }
+                                        Slider(
+                                            value = bypassContrast,
+                                            onValueChange = { bypassContrast = it },
+                                            valueRange = 0.80f..1.30f,
+                                            steps = 24,
+                                            colors = SliderDefaults.colors(thumbColor = PurpleLight, activeTrackColor = PurpleLight, inactiveTrackColor = Border)
+                                        )
+                                    }
+
+                                    // 5. Saturation Adjustment
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("🎨 Saturation (အရောင်ရင့်ဖျော့မှု)", fontSize = 11.sp, color = TextSecondary)
+                                            Text("${String.format(java.util.Locale.US, "%.2f", bypassSaturation)}×", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
+                                        }
+                                        Slider(
+                                            value = bypassSaturation,
+                                            onValueChange = { bypassSaturation = it },
+                                            valueRange = 0.80f..1.40f,
+                                            steps = 29,
+                                            colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
+                                        )
+                                    }
+
+                                    // 6. Noise / Film Grain
+                                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("📺 Digital Noise Grain (လက်ဗွေဖျက် အစက်အပြောက်)", fontSize = 11.sp, color = TextSecondary)
+                                            Text(if (bypassNoise == 0) "Off" else "$bypassNoise", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (bypassNoise > 0) Cyan else TextMuted)
+                                        }
+                                        Slider(
+                                            value = bypassNoise.toFloat(),
+                                            onValueChange = { bypassNoise = it.toInt() },
+                                            valueRange = 0f..20f,
+                                            steps = 19,
+                                            colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
+                                        )
+                                    }
+
+                                    // 7. Border Thickness & Manual Color Selection
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Text("🖼️ Border Thickness (ဘောင်အကျယ်)", fontSize = 11.sp, color = TextSecondary)
+                                            Text(if (bypassBorderWidth == 0) "No Border" else "$bypassBorderWidth px", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                        }
+                                        Slider(
+                                            value = bypassBorderWidth.toFloat(),
+                                            onValueChange = { bypassBorderWidth = it.toInt() },
+                                            valueRange = 0f..36f,
+                                            steps = 17,
+                                            colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                                        )
+
+                                        if (bypassBorderWidth > 0) {
+                                            Text("Border Color Palette & Manual Adjustment (ဘောင်အရောင်ရွေးချယ်ရန်)", fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
+
+                                            // Palette circles
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                PRESET_BORDER_COLORS.forEach { (hex, name) ->
+                                                    val c = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Throwable) { Color.Black }
+                                                    val isSelected = bypassBorderColor.equals(hex, ignoreCase = true)
+                                                    Box(
+                                                        modifier = Modifier
+                                                            .size(30.dp)
+                                                            .clip(CircleShape)
+                                                            .background(c)
+                                                            .border(
+                                                                width = if (isSelected) 2.5.dp else 1.dp,
+                                                                color = if (isSelected) Cyan else Border,
+                                                                shape = CircleShape
+                                                            )
+                                                            .clickable {
+                                                                bypassBorderColor = hex
+                                                                customHexInput = hex
+                                                            },
+                                                        contentAlignment = Alignment.Center
+                                                    ) {
+                                                        if (isSelected) {
+                                                            Icon(
+                                                                Icons.Default.Check,
+                                                                contentDescription = name,
+                                                                tint = if (hex == "#FFFFFF") Color.Black else Color.White,
+                                                                modifier = Modifier.size(16.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // Manual Hex Input with live swatch preview
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                            ) {
+                                                OutlinedTextField(
+                                                    value = customHexInput,
+                                                    onValueChange = { input ->
+                                                        customHexInput = input
+                                                        val clean = if (input.startsWith("#")) input else "#$input"
+                                                        if (clean.length == 7) {
+                                                            try {
+                                                                android.graphics.Color.parseColor(clean)
+                                                                bypassBorderColor = clean
+                                                            } catch (_: Throwable) {}
+                                                        }
+                                                    },
+                                                    label = { Text("Manual Color Hex (e.g. #FF5722)", fontSize = 10.sp) },
+                                                    singleLine = true,
+                                                    modifier = Modifier.weight(1f),
+                                                    colors = textFieldColors(focusedBorderColor = Cyan),
+                                                    textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+                                                )
+
+                                                // Swatch box
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(44.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(parsedBorderColor)
+                                                        .border(1.5.dp, Border, RoundedCornerShape(8.dp))
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        1 -> {
+                            // ── TAB 1: Watermark Blur Controls ──
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Enable Logo / Watermark Blur Box", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
+                                    Text("Delogo frosted blur over old channel logos & TV bugs", fontSize = 10.sp, color = TextMuted)
+                                }
+                                Switch(
+                                    checked = blurEnabled,
+                                    onCheckedChange = { blurEnabled = it },
+                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Amber)
+                                )
+                            }
+
+                            if (blurEnabled) {
+                                Column(
+                                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(BgCardAlt)
+                                        .border(1.dp, Amber.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
+                                        .padding(12.dp)
+                                ) {
+                                    Text("Quick Position Presets", fontSize = 11.sp, color = TextSecondary)
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        BLUR_PRESETS.chunked(2).forEach { row ->
+                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                row.forEach { preset ->
+                                                    FilterChip(
+                                                        selected = selectedPreset == preset,
+                                                        onClick = {
+                                                            selectedPreset = preset
+                                                            blurX = preset.x; blurY = preset.y
+                                                            blurW = preset.w; blurH = preset.h
+                                                        },
+                                                        label = { Text(preset.label, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                                        modifier = Modifier.weight(1f),
+                                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Amber, selectedLabelColor = Color.Black)
+                                                    )
+                                                }
+                                                if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+
+                                    // X & Y Sliders
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Box Left X Position", fontSize = 11.sp, color = TextSecondary)
+                                        Text("${(blurX * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                    }
+                                    Slider(value = blurX, onValueChange = { blurX = it; selectedPreset = null }, valueRange = 0f..1f,
+                                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Box Top Y Position", fontSize = 11.sp, color = TextSecondary)
+                                        Text("${(blurY * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                    }
+                                    Slider(value = blurY, onValueChange = { blurY = it; selectedPreset = null }, valueRange = 0f..1f,
+                                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                                    // Width & Height Sliders
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Box Width", fontSize = 11.sp, color = TextSecondary)
+                                        Text("${(blurW * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                    }
+                                    Slider(value = blurW, onValueChange = { blurW = it; selectedPreset = null }, valueRange = 0.02f..1f,
+                                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Box Height", fontSize = 11.sp, color = TextSecondary)
+                                        Text("${(blurH * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                    }
+                                    Slider(value = blurH, onValueChange = { blurH = it; selectedPreset = null }, valueRange = 0.02f..0.5f,
+                                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
+
+                                    // Blur Intensity
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Blur Radius / Intensity", fontSize = 11.sp, color = TextSecondary)
+                                        Text("$blurStrength", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
+                                    }
+                                    Slider(
+                                        value = blurStrength.toFloat(),
+                                        onValueChange = { blurStrength = it.toInt() },
+                                        valueRange = 5f..50f,
+                                        steps = 44,
+                                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                                    )
+                                }
+                            }
+                        }
+                        2 -> {
+                            // ── TAB 2: Audio & Playback Speed Controls ──
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(14.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(BgCardAlt)
+                                    .border(1.dp, Border, RoundedCornerShape(10.dp))
+                                    .padding(14.dp)
+                            ) {
+                                Text("Sound Design & Mastering Preset", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
+                                ExposedDropdownMenuBox(expanded = soundStyleExpanded, onExpandedChange = { soundStyleExpanded = it }) {
+                                    OutlinedTextField(
+                                        value = soundStyle.label,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = soundStyleExpanded) },
+                                        modifier = Modifier.fillMaxWidth().menuAnchor(),
+                                        colors = textFieldColors(focusedBorderColor = Cyan),
+                                        textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = TextPrimary)
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = soundStyleExpanded,
+                                        onDismissRequest = { soundStyleExpanded = false },
+                                        modifier = Modifier.background(BgCard)
+                                    ) {
+                                        SOUND_STYLES.forEach { style ->
+                                            DropdownMenuItem(
+                                                text = { Text(style.label, fontSize = 13.sp, color = TextPrimary) },
+                                                onClick = { soundStyle = style; soundStyleExpanded = false }
+                                            )
+                                        }
+                                    }
+                                }
+
+                                HorizontalDivider(color = Border.copy(alpha = 0.5f))
+
+                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                                    Text("Video Playback Speed", fontSize = 11.sp, color = TextSecondary)
+                                    Surface(shape = RoundedCornerShape(6.dp), color = Amber.copy(alpha = 0.15f)) {
+                                        Text(
+                                            "${String.format("%.2f", playbackSpeed)}×",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
+                                            fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber
+                                        )
+                                    }
+                                }
+                                Slider(
+                                    value = playbackSpeed,
+                                    onValueChange = { playbackSpeed = it },
+                                    valueRange = 0.5f..2.0f,
+                                    steps = 5,
+                                    colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
+                                )
+                            }
+                        }
+                        3 -> {
+                            // ── TAB 3: Pipeline Info, Progress & Logs ──
+                            val currentStageIndex = when (pipelineState.stage) {
+                                PipelineStage.DOWNLOADING -> 1
+                                PipelineStage.EXTRACTING_AUDIO -> 2
+                                PipelineStage.TRANSCRIBING -> 3
+                                PipelineStage.TRANSLATING_SCRIPT -> 4
+                                PipelineStage.DUBBING_VOICE -> 5
+                                PipelineStage.DUBBED_READY -> 5
+                                PipelineStage.COMPOSING_VIDEO -> 6
+                                PipelineStage.COMPLETED -> 6
+                                else -> 0
+                            }
+                            val stagePct = (pipelineState.stageProgress * 100).toInt().coerceIn(0, 100)
+                            val totalPct = (pipelineState.progress * 100).toInt().coerceIn(0, 100)
+
+                            Card(
+                                shape = RoundedCornerShape(12.dp),
+                                colors = CardDefaults.cardColors(containerColor = BgCardAlt),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Border)
+                            ) {
+                                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text("Pipeline Status", fontWeight = FontWeight.Bold, color = TextPrimary, fontSize = 13.sp)
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = if (pipelineState.stage == PipelineStage.COMPLETED) GreenBg else PurpleDim.copy(alpha = 0.3f)
+                                        ) {
+                                            Text(
+                                                text = pipelineState.stage.name,
+                                                color = if (pipelineState.stage == PipelineStage.COMPLETED) Green else PurpleLight,
+                                                fontSize = 10.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+
+                                    // Stepper pills
+                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        listOf(
+                                            1 to "Download",
+                                            2 to "Audio",
+                                            3 to "Whisper",
+                                            4 to "Gemini",
+                                            5 to "Dubbing",
+                                            6 to "Render"
+                                        ).forEach { (idx, name) ->
+                                            val isDone = currentStageIndex > idx || pipelineState.stage == PipelineStage.COMPLETED
+                                            val isActive = currentStageIndex == idx
+                                            val pillBg = when {
+                                                isDone -> Green.copy(alpha = 0.15f)
+                                                isActive -> Cyan.copy(alpha = 0.20f)
+                                                else -> BgCard
+                                            }
+                                            val pillColor = when {
+                                                isDone -> Green
+                                                isActive -> Cyan
+                                                else -> TextMuted
+                                            }
+                                            val pillBorder = when {
+                                                isDone -> Green.copy(alpha = 0.5f)
+                                                isActive -> Cyan
+                                                else -> Border
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = pillBg,
+                                                border = androidx.compose.foundation.BorderStroke(1.dp, pillBorder),
+                                                modifier = Modifier.padding(horizontal = 1.dp)
+                                            ) {
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 3.dp)
+                                                ) {
+                                                    Text(
+                                                        text = if (isDone) "✓" else if (isActive) "$stagePct%" else "$idx",
+                                                        fontSize = 9.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = pillColor
+                                                    )
+                                                    Text(name, fontSize = 8.sp, color = pillColor)
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text(pipelineState.message, color = TextPrimary, fontSize = 11.sp)
+
+                                    if (pipelineState.logLines.isNotEmpty()) {
+                                        HorizontalDivider(color = Border)
+                                        Text("Console Logs:", fontSize = 10.sp, color = TextMuted)
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            pipelineState.logLines.takeLast(6).forEach { line ->
+                                                Text(line, fontSize = 9.sp, color = TextMuted, fontFamily = FontFamily.Monospace)
+                                            }
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    OutlinedButton(
+                                        onClick = { pipelineManager.reset() },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        colors = ButtonDefaults.outlinedButtonColors(contentColor = TextSecondary),
+                                        border = androidx.compose.foundation.BorderStroke(1.dp, Border)
+                                    ) {
+                                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("Start New Recap (ဒါဘင်အသစ်ပြန်စတင်ရန်)", fontSize = 11.sp)
+                                    }
+                                }
+                            }
+
+                            if (pipelineState.stage == PipelineStage.COMPLETED && pipelineState.finalVideoUri != null) {
+                                ElevatedCard(shape = RoundedCornerShape(14.dp), colors = CardDefaults.elevatedCardColors(containerColor = GreenBg)) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Green)
+                                            Text("Recap Video Ready in Gallery!", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                                        }
+                                        Text("Movies/RecapMaster/ တွင် အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။", fontSize = 11.sp, color = Color(0xFFA7F3D0))
+                                    }
+                                }
+                            }
+
+                            if (pipelineState.stage == PipelineStage.FAILED) {
+                                ElevatedCard(shape = RoundedCornerShape(14.dp), colors = CardDefaults.elevatedCardColors(containerColor = RedBg)) {
+                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            Icon(Icons.Default.Error, contentDescription = null, tint = Red)
+                                            Text("Render Error", fontWeight = FontWeight.Bold, color = Red, fontSize = 13.sp)
+                                        }
+                                        Text(pipelineState.error ?: "Unknown error", fontSize = 11.sp, color = Color(0xFFFCA5A5), fontFamily = FontFamily.Monospace)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+            }
+        } else {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
 
             // ── Auth Status Banner (Notifications / Alerts) ───────────────
             AnimatedVisibility(visible = authMessage != null) {
@@ -1361,634 +2324,7 @@ fun RecapStudioScreen(
                 }
             }
 
-            // ── Step 2: Post-Dubbing Interactive Live Studio (Subtitles & Watermark Blur) ──
-            AnimatedVisibility(visible = isDubbedReady || isComposing || isCompleted) {
-                StudioCard(
-                    title = "2. Live Studio: Watermark & Video Tuning (Live Preview)",
-                    icon = Icons.Default.Preview,
-                    accentColor = Cyan
-                ) {
-                    Text(
-                        "Video & voice are dubbed! Adjust your watermark blur box and playback speed in real-time on the video preview below before generating the final video.",
-                        fontSize = 11.sp,
-                        color = TextSecondary
-                    )
-
-                    val parsedBorderColor = remember(bypassBorderColor) {
-                        try {
-                            val cleanHex = if (bypassBorderColor.startsWith("#")) bypassBorderColor else "#$bypassBorderColor"
-                            Color(android.graphics.Color.parseColor(cleanHex))
-                        } catch (_: Throwable) {
-                            Color.Black
-                        }
-                    }
-                    val previewBorderDp = if (bypassEnabled && bypassBorderWidth > 0) {
-                        (bypassBorderWidth / 3).coerceIn(2, 14).dp
-                    } else 0.dp
-
-                    // ── INTERACTIVE LIVE PREVIEW BOX WITH REAL-TIME OVERLAYS ──
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(240.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black)
-                            .then(
-                                if (previewBorderDp > 0.dp) {
-                                    Modifier.border(previewBorderDp, parsedBorderColor, RoundedCornerShape(12.dp))
-                                } else Modifier
-                            )
-                    ) {
-                        if (exoPlayer != null) {
-                            AndroidView(
-                                factory = { ctx ->
-                                    PlayerView(ctx).apply {
-                                        player = exoPlayer
-                                        useController = true
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        scaleX = (if (bypassEnabled && bypassHflip) -1f else 1f) * (if (bypassEnabled) 1f + bypassZoom else 1f)
-                                        scaleY = if (bypassEnabled) 1f + bypassZoom else 1f
-                                    }
-                            )
-                        } else {
-                            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Video player unavailable", color = TextMuted, fontSize = 12.sp)
-                            }
-                        }
-
-                        // Anti-Copyright Active Badge on Preview
-                        if (bypassEnabled) {
-                            Surface(
-                                shape = RoundedCornerShape(6.dp),
-                                color = Color.Black.copy(alpha = 0.75f),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Cyan),
-                                modifier = Modifier.padding(8.dp).align(Alignment.TopStart)
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                                ) {
-                                    Text("🛡️", fontSize = 10.sp)
-                                    Text("Bypass FX Active", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-
-                        // Real-time Watermark Blur Box Overlay
-                        if (blurEnabled) {
-                            BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                                val leftPx = maxWidth * blurX
-                                val topPx = maxHeight * blurY
-                                val widthPx = maxWidth * blurW
-                                val heightPx = maxHeight * blurH
-
-                                Box(
-                                    modifier = Modifier
-                                        .offset(x = leftPx, y = topPx)
-                                        .size(width = widthPx, height = heightPx)
-                                        .background(Amber.copy(alpha = 0.3f))
-                                        .border(1.5.dp, Amber, RoundedCornerShape(4.dp))
-                                        .padding(4.dp)
-                                ) {
-                                    Text(
-                                        text = "💧 Blur Area (${(blurW * 100).toInt()}% × ${(blurH * 100).toInt()}%)",
-                                        color = Amber,
-                                        fontSize = 9.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = Border)
-
-                    // ── Copyright Bypass & Anti-Detection FX Section ──
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text("🛡️ Copyright Bypass & Anti-Detection", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
-                                Surface(shape = RoundedCornerShape(4.dp), color = Cyan.copy(alpha = 0.15f)) {
-                                    Text("NEW", color = Cyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp))
-                                }
-                            }
-                            Text("မူပိုင်ခွင့်စစ်ဆေးမှုကျော်လွှားရန် Flip, Zoom, Color, Noise & Border ချိန်ညှိမှုများ", fontSize = 10.sp, color = TextMuted)
-                        }
-                        Switch(
-                            checked = bypassEnabled,
-                            onCheckedChange = { bypassEnabled = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Cyan)
-                        )
-                    }
-
-                    if (bypassEnabled) {
-                        Column(
-                            verticalArrangement = Arrangement.spacedBy(12.dp),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(BgCardAlt)
-                                .border(1.dp, Cyan.copy(alpha = 0.3f), RoundedCornerShape(10.dp))
-                                .padding(12.dp)
-                        ) {
-                            // Quick Presets Row
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        bypassHflip = true
-                                        bypassZoom = 0.05f
-                                        bypassBrightness = 0.03f
-                                        bypassContrast = 1.08f
-                                        bypassSaturation = 1.10f
-                                        bypassNoise = 8
-                                        bypassBorderWidth = 14
-                                        bypassBorderColor = "#000000"
-                                        customHexInput = "#000000"
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Cyan),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Cyan.copy(alpha = 0.5f)),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text("⚡ Recommended Preset (အကြံပြုချက်)", fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                }
-                                OutlinedButton(
-                                    onClick = {
-                                        bypassHflip = false
-                                        bypassZoom = 0f
-                                        bypassBrightness = 0f
-                                        bypassContrast = 1.0f
-                                        bypassSaturation = 1.0f
-                                        bypassNoise = 0
-                                        bypassBorderWidth = 0
-                                        bypassBorderColor = "#000000"
-                                        customHexInput = "#000000"
-                                    },
-                                    shape = RoundedCornerShape(8.dp),
-                                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextMuted),
-                                    border = androidx.compose.foundation.BorderStroke(1.dp, Border),
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp)
-                                ) {
-                                    Text("🔄 Reset", fontSize = 10.sp)
-                                }
-                            }
-
-                            HorizontalDivider(color = Border.copy(alpha = 0.5f))
-
-                            // 1. Horizontal Flip
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text("↔️ Horizontal Flip (ဘယ်ညာလှန်လှည့်ခြင်း)", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
-                                    Text("ရုပ်ရှင်ဘယ်ညာပြောင်းပြန်လှန်၍ Video Fingerprint ကို ဖြတ်တောက်မည်", fontSize = 9.sp, color = TextMuted)
-                                }
-                                Switch(
-                                    checked = bypassHflip,
-                                    onCheckedChange = { bypassHflip = it },
-                                    colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Cyan)
-                                )
-                            }
-
-                            // 2. Zoom & Crop
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("🔍 Center Zoom & Crop (အနားသတ်ဖြတ်တောက်ပြီးချဲ့ခြင်း)", fontSize = 11.sp, color = TextSecondary)
-                                    Text("+${(bypassZoom * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Cyan)
-                                }
-                                Slider(
-                                    value = bypassZoom,
-                                    onValueChange = { bypassZoom = it },
-                                    valueRange = 0f..0.25f,
-                                    steps = 24,
-                                    colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
-                                )
-                            }
-
-                            // 3. Brightness Adjustment
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("☀️ Brightness (အလင်းအမှောင်ချိန်ညှိမှု)", fontSize = 11.sp, color = TextSecondary)
-                                    Text("${if (bypassBrightness >= 0) "+" else ""}${(bypassBrightness * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                                }
-                                Slider(
-                                    value = bypassBrightness,
-                                    onValueChange = { bypassBrightness = it },
-                                    valueRange = -0.20f..0.20f,
-                                    steps = 39,
-                                    colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
-                                )
-                            }
-
-                            // 4. Contrast Adjustment
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("🌓 Contrast (အရောင်ပြတ်သားမှု)", fontSize = 11.sp, color = TextSecondary)
-                                    Text("${String.format(java.util.Locale.US, "%.2f", bypassContrast)}×", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = PurpleLight)
-                                }
-                                Slider(
-                                    value = bypassContrast,
-                                    onValueChange = { bypassContrast = it },
-                                    valueRange = 0.80f..1.30f,
-                                    steps = 24,
-                                    colors = SliderDefaults.colors(thumbColor = PurpleLight, activeTrackColor = PurpleLight, inactiveTrackColor = Border)
-                                )
-                            }
-
-                            // 5. Saturation Adjustment
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("🎨 Saturation (အရောင်ရင့်ဖျော့မှု)", fontSize = 11.sp, color = TextSecondary)
-                                    Text("${String.format(java.util.Locale.US, "%.2f", bypassSaturation)}×", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Green)
-                                }
-                                Slider(
-                                    value = bypassSaturation,
-                                    onValueChange = { bypassSaturation = it },
-                                    valueRange = 0.80f..1.40f,
-                                    steps = 29,
-                                    colors = SliderDefaults.colors(thumbColor = Green, activeTrackColor = Green, inactiveTrackColor = Border)
-                                )
-                            }
-
-                            // 6. Noise / Film Grain
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("📺 Digital Noise Grain (လက်ဗွေဖျက် အစက်အပြောက်)", fontSize = 11.sp, color = TextSecondary)
-                                    Text(if (bypassNoise == 0) "Off" else "$bypassNoise", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (bypassNoise > 0) Cyan else TextMuted)
-                                }
-                                Slider(
-                                    value = bypassNoise.toFloat(),
-                                    onValueChange = { bypassNoise = it.toInt() },
-                                    valueRange = 0f..20f,
-                                    steps = 19,
-                                    colors = SliderDefaults.colors(thumbColor = Cyan, activeTrackColor = Cyan, inactiveTrackColor = Border)
-                                )
-                            }
-
-                            // 7. Border Thickness & Manual Color Selection
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text("🖼️ Border Thickness (ဘောင်အကျယ်)", fontSize = 11.sp, color = TextSecondary)
-                                    Text(if (bypassBorderWidth == 0) "No Border" else "$bypassBorderWidth px", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                                }
-                                Slider(
-                                    value = bypassBorderWidth.toFloat(),
-                                    onValueChange = { bypassBorderWidth = it.toInt() },
-                                    valueRange = 0f..36f,
-                                    steps = 17,
-                                    colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
-                                )
-
-                                if (bypassBorderWidth > 0) {
-                                    Text("Border Color Palette & Manual Adjustment (ဘောင်အရောင်ရွေးချယ်ရန်)", fontSize = 10.sp, color = TextSecondary, fontWeight = FontWeight.Medium)
-
-                                    // Palette circles
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        PRESET_BORDER_COLORS.forEach { (hex, name) ->
-                                            val c = try { Color(android.graphics.Color.parseColor(hex)) } catch (_: Throwable) { Color.Black }
-                                            val isSelected = bypassBorderColor.equals(hex, ignoreCase = true)
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(30.dp)
-                                                    .clip(CircleShape)
-                                                    .background(c)
-                                                    .border(
-                                                        width = if (isSelected) 2.5.dp else 1.dp,
-                                                        color = if (isSelected) Cyan else Border,
-                                                        shape = CircleShape
-                                                    )
-                                                    .clickable {
-                                                        bypassBorderColor = hex
-                                                        customHexInput = hex
-                                                    },
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                if (isSelected) {
-                                                    Icon(
-                                                        Icons.Default.Check,
-                                                        contentDescription = name,
-                                                        tint = if (hex == "#FFFFFF") Color.Black else Color.White,
-                                                        modifier = Modifier.size(16.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // Manual Hex Input with live swatch preview
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        OutlinedTextField(
-                                            value = customHexInput,
-                                            onValueChange = { input ->
-                                                customHexInput = input
-                                                val clean = if (input.startsWith("#")) input else "#$input"
-                                                if (clean.length == 7) {
-                                                    try {
-                                                        android.graphics.Color.parseColor(clean)
-                                                        bypassBorderColor = clean
-                                                    } catch (_: Throwable) {}
-                                                }
-                                            },
-                                            label = { Text("Manual Color Hex (e.g. #FF5722)", fontSize = 10.sp) },
-                                            singleLine = true,
-                                            modifier = Modifier.weight(1f),
-                                            colors = textFieldColors(focusedBorderColor = Cyan),
-                                            textStyle = LocalTextStyle.current.copy(fontSize = 11.sp, fontFamily = FontFamily.Monospace)
-                                        )
-
-                                        // Swatch box
-                                        Box(
-                                            modifier = Modifier
-                                                .size(44.dp)
-                                                .clip(RoundedCornerShape(8.dp))
-                                                .background(parsedBorderColor)
-                                                .border(1.5.dp, Border, RoundedCornerShape(8.dp))
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    HorizontalDivider(color = Border)
-
-                    // ── Logo / Watermark Blur Section ──
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text("Enable Logo / Watermark Blur Box", fontSize = 13.sp, fontWeight = FontWeight.Medium, color = TextPrimary)
-                            Text("Delogo frosted blur over old channel logos & TV bugs", fontSize = 10.sp, color = TextMuted)
-                        }
-                        Switch(
-                            checked = blurEnabled,
-                            onCheckedChange = { blurEnabled = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = Color.White, checkedTrackColor = Amber)
-                        )
-                    }
-
-                    if (blurEnabled) {
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            // Presets
-                            Text("Quick Position Presets", fontSize = 11.sp, color = TextSecondary)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                BLUR_PRESETS.chunked(2).forEach { row ->
-                                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        row.forEach { preset ->
-                                            FilterChip(
-                                                selected = selectedPreset == preset,
-                                                onClick = {
-                                                    selectedPreset = preset
-                                                    blurX = preset.x; blurY = preset.y
-                                                    blurW = preset.w; blurH = preset.h
-                                                },
-                                                label = { Text(preset.label, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                                modifier = Modifier.weight(1f),
-                                                colors = FilterChipDefaults.filterChipColors(selectedContainerColor = Amber, selectedLabelColor = Color.Black)
-                                            )
-                                        }
-                                        if (row.size == 1) Spacer(modifier = Modifier.weight(1f))
-                                    }
-                                }
-                            }
-
-                            // X & Y Sliders
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Box Left X Position", fontSize = 11.sp, color = TextSecondary)
-                                Text("${(blurX * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                            }
-                            Slider(value = blurX, onValueChange = { blurX = it; selectedPreset = null }, valueRange = 0f..1f,
-                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Box Top Y Position", fontSize = 11.sp, color = TextSecondary)
-                                Text("${(blurY * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                            }
-                            Slider(value = blurY, onValueChange = { blurY = it; selectedPreset = null }, valueRange = 0f..1f,
-                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                            // Width & Height Sliders
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Box Width", fontSize = 11.sp, color = TextSecondary)
-                                Text("${(blurW * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                            }
-                            Slider(value = blurW, onValueChange = { blurW = it; selectedPreset = null }, valueRange = 0.02f..1f,
-                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Box Height", fontSize = 11.sp, color = TextSecondary)
-                                Text("${(blurH * 100).toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                            }
-                            Slider(value = blurH, onValueChange = { blurH = it; selectedPreset = null }, valueRange = 0.02f..0.5f,
-                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border))
-
-                            // Blur Intensity
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Blur Radius / Intensity", fontSize = 11.sp, color = TextSecondary)
-                                Text("$blurStrength", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber)
-                            }
-                            Slider(
-                                value = blurStrength.toFloat(),
-                                onValueChange = { blurStrength = it.toInt() },
-                                valueRange = 5f..50f,
-                                steps = 44,
-                                colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
-                            )
-                        }
-                    }
-
-                    HorizontalDivider(color = Border)
-
-                    // ── Sound Design & Video Speed ──
-                    Text("Sound Design & Mastering Preset", fontSize = 12.sp, fontWeight = FontWeight.Medium, color = TextSecondary)
-                    ExposedDropdownMenuBox(expanded = soundStyleExpanded, onExpandedChange = { soundStyleExpanded = it }) {
-                        OutlinedTextField(
-                            value = soundStyle.label,
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = soundStyleExpanded) },
-                            modifier = Modifier.fillMaxWidth().menuAnchor(),
-                            colors = textFieldColors(focusedBorderColor = Cyan),
-                            textStyle = LocalTextStyle.current.copy(fontSize = 13.sp, color = TextPrimary)
-                        )
-                        ExposedDropdownMenu(
-                            expanded = soundStyleExpanded,
-                            onDismissRequest = { soundStyleExpanded = false },
-                            modifier = Modifier.background(BgCard)
-                        ) {
-                            SOUND_STYLES.forEach { style ->
-                                DropdownMenuItem(
-                                    text = { Text(style.label, fontSize = 13.sp, color = TextPrimary) },
-                                    onClick = { soundStyle = style; soundStyleExpanded = false }
-                                )
-                            }
-                        }
-                    }
-
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("Playback Speed", fontSize = 11.sp, color = TextSecondary)
-                        Surface(shape = RoundedCornerShape(6.dp), color = Amber.copy(alpha = 0.15f)) {
-                            Text(
-                                "${String.format("%.2f", playbackSpeed)}×",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Amber
-                            )
-                        }
-                    }
-                    Slider(
-                        value = playbackSpeed,
-                        onValueChange = { playbackSpeed = it },
-                        valueRange = 0.5f..2.0f,
-                        steps = 5,
-                        colors = SliderDefaults.colors(thumbColor = Amber, activeTrackColor = Amber, inactiveTrackColor = Border)
-                    )
-
-                    HorizontalDivider(color = Border)
-
-                    // ── GENERATE FINAL VIDEO BUTTON ──
-                    val canRenderFinal = isUserLoggedIn && !isExpired && !isComposing
-
-                    Button(
-                        onClick = {
-                            if (!isUserLoggedIn) {
-                                authMessage = "⚠️ Please sign in with your Google account first."
-                                return@Button
-                            }
-                            if (isExpired) {
-                                authMessage = "❌ Free access expired. Please watch an ad to get +10 minutes of free use."
-                                return@Button
-                            }
-                            try {
-                                exoPlayer?.pause()
-                                onStartPipeline(
-                                    PipelineParams(
-                                        action        = "COMPOSE",
-                                        soundStyle    = soundStyle.value,
-                                        burnSubtitles = false,
-                                        speed         = playbackSpeed,
-                                        blurEnabled   = blurEnabled,
-                                        blurX         = blurX, blurY = blurY,
-                                        blurW         = blurW, blurH = blurH,
-                                        blurStrength  = blurStrength,
-                                        bypassEnabled     = bypassEnabled,
-                                        bypassHflip       = bypassHflip,
-                                        bypassZoom        = bypassZoom,
-                                        bypassBrightness  = bypassBrightness,
-                                        bypassContrast    = bypassContrast,
-                                        bypassSaturation  = bypassSaturation,
-                                        bypassNoise       = bypassNoise,
-                                        bypassBorderWidth = bypassBorderWidth,
-                                        bypassBorderColor = bypassBorderColor
-                                    )
-                                )
-                            } catch (t: Throwable) {
-                                t.printStackTrace()
-                            }
-                        },
-                        enabled = canRenderFinal,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(14.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Cyan, contentColor = Color.Black, disabledContainerColor = Border)
-                    ) {
-                        if (isComposing) {
-                            CircularProgressIndicator(color = Color.Black, modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text("Rendering Final Video (FFmpeg)...", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        } else if (!isUserLoggedIn) {
-                            Icon(Icons.Default.Lock, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("🔐 Sign In Required to Render (အကောင့်ဝင်ပါ)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        } else if (isExpired) {
-                            Icon(Icons.Default.TimerOff, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("⛔ Access Expired — Contact Admin (သက်တမ်းတိုးပါ)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        } else {
-                            Icon(Icons.Default.MovieCreation, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("🎬 2. Generate Final Video (ရုပ်ရှင်အပြီးသတ်ထုတ်ယူမည်)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                        }
-                    }
-                }
-            }
-
-            // ── Completion Banner with Gallery Export Info ────────────────
-            AnimatedVisibility(
-                visible = pipelineState.stage == PipelineStage.COMPLETED && pipelineState.finalVideoUri != null
-            ) {
-                ElevatedCard(shape = RoundedCornerShape(16.dp), colors = CardDefaults.elevatedCardColors(containerColor = GreenBg)) {
-                    Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Green)
-                            Text("Recap Video Ready!", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 16.sp)
-                        }
-
-                        Text(
-                            "Video saved to Movies/RecapMaster/ in your Gallery. Temp files cleaned up.",
-                            fontSize = 11.sp,
-                            color = Color(0xFFA7F3D0)
-                        )
-
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            // Open in external player
-                            OutlinedButton(
-                                onClick = {
-                                    val intent = Intent(Intent.ACTION_VIEW).apply {
-                                        setDataAndType(pipelineState.finalVideoUri, "video/mp4")
-                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                    }
-                                    context.startActivity(Intent.createChooser(intent, "Open in..."))
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.outlinedButtonColors(contentColor = Green),
-                                border = androidx.compose.foundation.BorderStroke(1.dp, Green)
-                            ) {
-                                Icon(Icons.Default.OpenInNew, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("Open In...", fontSize = 13.sp)
-                            }
-
-                            // Make another
-                            Button(
-                                onClick = { pipelineManager.reset() },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = Purple)
-                            ) {
-                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text("New Recap", fontSize = 13.sp)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // ── Error Banner ───────────────────────────────────────────────
+            // ── Error Banner (Phase 1) ──
             AnimatedVisibility(visible = pipelineState.stage == PipelineStage.FAILED) {
                 ElevatedCard(shape = RoundedCornerShape(16.dp), colors = CardDefaults.elevatedCardColors(containerColor = RedBg)) {
                     Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -2003,7 +2339,7 @@ fun RecapStudioScreen(
                             HorizontalDivider(color = Color(0xFF7F1D1D))
                             Text("Processing Log:", fontSize = 10.sp, color = Red.copy(alpha = 0.7f))
                             Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                pipelineState.logLines.forEach { line ->
+                                pipelineState.logLines.takeLast(6).forEach { line ->
                                     Text(line, fontSize = 10.sp, color = Color(0xFFFCA5A5).copy(alpha = 0.8f), fontFamily = FontFamily.Monospace)
                                 }
                             }
@@ -2026,6 +2362,7 @@ fun RecapStudioScreen(
             Spacer(modifier = Modifier.height(24.dp))
         }
     }
+}
 }
 
 // ── Shared composables ─────────────────────────────────────────────────────────
