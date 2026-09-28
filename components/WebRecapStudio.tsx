@@ -684,7 +684,7 @@ export function WebRecapStudio() {
                 <Video className="w-4 h-4 text-cyan-400" />
                 {t.viewport.title}
               </h2>
-              {selectedFile ? (
+              {selectedFile && (
                 <button
                   type="button"
                   onClick={() => {
@@ -696,33 +696,6 @@ export function WebRecapStudio() {
                 >
                   {t.viewport.replaceVideo}
                 </button>
-              ) : (
-                <div className="flex items-center p-0.5 bg-zinc-950 border border-white/[0.08] rounded-xl">
-                  <button
-                    type="button"
-                    onClick={() => setInputMode("file")}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                      inputMode === "file"
-                        ? "bg-zinc-800 text-cyan-300 shadow-sm border border-cyan-500/25"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <Upload className="w-3 h-3" />
-                    <span>{t.youtube.tabUpload}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setInputMode("youtube")}
-                    className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
-                      inputMode === "youtube"
-                        ? "bg-gradient-to-r from-red-600/30 to-rose-600/30 text-red-300 shadow-sm border border-red-500/35"
-                        : "text-zinc-400 hover:text-zinc-200"
-                    }`}
-                  >
-                    <Youtube className="w-3 h-3 text-red-500" />
-                    <span>{t.youtube.tabYoutube}</span>
-                  </button>
-                </div>
               )}
             </div>
 
@@ -733,156 +706,94 @@ export function WebRecapStudio() {
                 copyrightConfig={copyrightConfig}
                 lang={appLang}
               />
-            ) : inputMode === "youtube" ? (
-              <div className="border border-white/[0.08] rounded-2xl p-6 bg-zinc-950/60 backdrop-blur-md space-y-4 shadow-inner">
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <div className="relative flex-1">
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-zinc-500">
-                      <Youtube className="w-4 h-4 text-red-400" />
-                    </div>
-                    <input
-                      type="text"
-                      value={youtubeUrl}
-                      onChange={(e) => {
-                        setYoutubeUrl(e.target.value);
-                        setYoutubeError("");
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") fetchYoutubeInfo();
-                      }}
-                      placeholder={t.youtube.inputPlaceholder}
-                      className="w-full bg-zinc-900/90 border border-white/[0.1] rounded-xl pl-10 pr-4 py-2.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-red-500/60 focus:ring-1 focus:ring-red-500/40 transition-all font-mono"
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={fetchYoutubeInfo}
-                    disabled={youtubeLoading || !youtubeUrl.trim()}
-                    className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-red-600/25 hover:bg-red-600/35 text-red-200 border border-red-500/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5 shrink-0"
-                  >
-                    {youtubeLoading ? (
-                      <>
-                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        <span>{t.youtube.fetching}</span>
-                      </>
-                    ) : (
-                      <>
-                        <ArrowRight className="w-3.5 h-3.5" />
-                        <span>{t.youtube.fetchBtn}</span>
-                      </>
-                    )}
-                  </button>
-                </div>
-
-                {youtubeError && (
-                  <div className="p-3 rounded-xl bg-red-950/40 border border-red-500/30 text-xs text-red-300 flex items-center gap-2">
-                    <AlertCircle className="w-4 h-4 shrink-0 text-red-400" />
-                    <span>{youtubeError}</span>
-                  </div>
-                )}
-
-                {youtubeInfo && (
-                  <div className="p-4 rounded-xl border border-white/[0.08] bg-zinc-900/70 space-y-3.5 animate-in fade-in slide-in-from-top-2 duration-200">
-                    <div className="flex flex-col sm:flex-row gap-3.5 items-start sm:items-center">
-                      <div className="relative w-full sm:w-36 h-24 rounded-lg overflow-hidden bg-black shrink-0 border border-white/[0.08]">
-                        <img
-                          src={youtubeInfo.thumbnail}
-                          alt={youtubeInfo.title}
-                          className="w-full h-full object-cover"
-                        />
-                        <div className="absolute bottom-1 right-1 px-1.5 py-0.5 rounded bg-black/80 font-mono text-[10px] text-zinc-300">
-                          {formatTimer(youtubeInfo.duration)}
-                        </div>
-                      </div>
-                      <div className="flex-1 min-w-0 flex flex-col justify-between py-0.5 space-y-1">
-                        <div>
-                          <h4 className="text-xs font-semibold text-zinc-100 line-clamp-2 leading-snug">
-                            {youtubeInfo.title}
-                          </h4>
-                          <p className="text-[11px] text-zinc-400 mt-1">
-                            {t.youtube.author}: <span className="text-zinc-200">{youtubeInfo.channel}</span>
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 text-[10px] text-zinc-500 font-mono pt-1">
-                          <span>{t.youtube.duration}: {youtubeInfo.duration}s</span>
-                          <span>•</span>
-                          <span>MP4 Progressive HD</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={downloadAndLoadYoutubeVideo}
-                        disabled={youtubeDownloading}
-                        className="w-full py-3 px-4 rounded-xl text-xs font-bold bg-gradient-to-r from-red-600 via-rose-600 to-purple-600 hover:from-red-500 hover:to-purple-500 text-white shadow-ambient-glow transition-all flex items-center justify-center gap-2 disabled:opacity-50 active:scale-[0.99]"
-                      >
-                        {youtubeDownloading ? (
-                          <>
-                            <RefreshCw className="w-4 h-4 animate-spin" />
-                            <span>{appLang === "my" ? "ဗီဒီယို တိုက်ရိုက် ဒေါင်းလုဒ်လုပ်နေပါသည်..." : "Downloading video directly into studio..."}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Download className="w-4 h-4" />
-                            <span>{appLang === "my" ? "ဗီဒီယို တိုက်ရိုက် ရယူပြီး Studio သို့ထည့်မည်" : "Direct Download & Load into Studio"}</span>
-                          </>
-                        )}
-                      </button>
-
-                      <div className="flex items-center justify-between text-[11px] text-zinc-400 px-1 pt-0.5">
-                        <span className="flex items-center gap-1 text-zinc-400">
-                          <Sparkles className="w-3 h-3 text-cyan-400" />
-                          <span>{appLang === "my" ? "တိုက်ရိုက်ဒေါင်းလုဒ် မရပါက:" : "Alternative 1-click:"}</span>
-                        </span>
-                        <a
-                          href={youtubeInfo.externalDownloadUrl || `https://y2mate.is/watch?v=${youtubeInfo.videoId}`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-cyan-400 hover:text-cyan-300 hover:underline flex items-center gap-1 font-medium"
-                        >
-                          <span>{appLang === "my" ? "ပြင်ပမှ MP4 ဒေါင်းလုဒ်ရယူရန်" : "Download MP4 via Helper"}</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                      </div>
-
-                      {youtubeError && (
-                        <div className="pt-2 border-t border-white/[0.08]">
-                          <label className="w-full flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-zinc-800/80 hover:bg-zinc-700/80 border border-white/[0.1] text-xs font-semibold text-cyan-300 hover:text-cyan-200 cursor-pointer transition">
-                            <Upload className="w-3.5 h-3.5" />
-                            <span>{appLang === "my" ? "ဒေါင်းလုဒ်ရရှိသော ဖိုင်တင်မည်" : "Upload Downloaded File"}</span>
-                            <input
-                              type="file"
-                              accept="video/*,audio/*"
-                              onChange={handleFileChange}
-                              className="hidden"
-                            />
-                          </label>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
             ) : (
-              <label className="border-2 border-dashed border-zinc-800 hover:border-amber-500/40 rounded-2xl p-10 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 bg-zinc-950/40 hover:bg-zinc-900/30 group shadow-inner">
-                <input
-                  type="file"
-                  accept="video/*,audio/*"
-                  onChange={handleFileChange}
-                  className="hidden"
-                />
-                <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-white/[0.08] group-hover:border-amber-500/30 group-hover:bg-amber-500/10 flex items-center justify-center text-zinc-400 group-hover:text-amber-400 transition-all duration-200 mb-3.5 shadow-sm group-hover:scale-105">
-                  <Upload className="w-6 h-6" />
+              <div className="space-y-4">
+                {/* 1. Main File Dropzone */}
+                <label className="border-2 border-dashed border-zinc-800 hover:border-cyan-500/40 rounded-2xl p-8 flex flex-col items-center justify-center text-center cursor-pointer transition-all duration-200 bg-zinc-950/40 hover:bg-zinc-900/30 group shadow-inner">
+                  <input
+                    type="file"
+                    accept="video/*,audio/*"
+                    onChange={handleFileChange}
+                    className="hidden"
+                  />
+                  <div className="w-14 h-14 rounded-2xl bg-zinc-900 border border-white/[0.08] group-hover:border-cyan-500/30 group-hover:bg-cyan-500/10 flex items-center justify-center text-zinc-400 group-hover:text-cyan-400 transition-all duration-200 mb-3.5 shadow-sm group-hover:scale-105">
+                    <Upload className="w-6 h-6" />
+                  </div>
+                  <span className="text-sm font-semibold text-zinc-200 tracking-tight">
+                    {t.viewport.dropzoneTitle}
+                  </span>
+                  <span className="text-xs text-zinc-500 mt-1 max-w-xs leading-relaxed">
+                    {t.viewport.dropzoneDesc}
+                  </span>
+                </label>
+
+                {/* 2. YouTube 3rd-Party Downloader Recommendation Cards */}
+                <div className="p-4 rounded-2xl border border-white/[0.08] bg-zinc-950/60 backdrop-blur-md space-y-3 shadow-inner">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 shrink-0">
+                      <Youtube className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-xs font-semibold text-zinc-200">
+                        {appLang === "my" ? "YouTube ဗီဒီယို ဒေါင်းလုဒ်ရယူရန် ဝဘ်ဆိုဒ်များ" : "YouTube Video Downloader Helpers"}
+                      </h3>
+                      <p className="text-[11px] text-zinc-400">
+                        {appLang === "my" 
+                          ? "အောက်ပါ ဝဘ်ဆိုဒ်များမှတစ်ဆင့် MP4 ဒေါင်းလုဒ်ရယူပြီး အပေါ်ရှိအကွက်ထဲသို့ ဖိုင်တင်ပါ" 
+                          : "Download MP4 via these tools, then drag & drop the file above"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                    {/* Website 1: SaveFrom.net */}
+                    <a
+                      href="https://en1.savefrom.net/21-youtube-to-mp4-40LR.html"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 hover:bg-zinc-800/90 border border-white/[0.08] hover:border-emerald-500/40 transition-all shadow-sm active:scale-[0.98]"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0">
+                          <Download className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <div className="text-xs font-semibold text-zinc-200 group-hover:text-emerald-300 transition-colors truncate">
+                            SaveFrom.net
+                          </div>
+                          <div className="text-[10px] text-zinc-500 font-mono">
+                            YouTube to MP4 HD
+                          </div>
+                        </div>
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover:text-emerald-400 shrink-0 ml-2 transition-colors" />
+                    </a>
+
+                    {/* Website 2: YT-MP4 */}
+                    <a
+                      href="https://yt-mp4.com.co/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex items-center justify-between p-3 rounded-xl bg-zinc-900/80 hover:bg-zinc-800/90 border border-white/[0.08] hover:border-red-500/40 transition-all shadow-sm active:scale-[0.98]"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 flex items-center justify-center shrink-0">
+                          <Youtube className="w-4 h-4" />
+                        </div>
+                        <div className="truncate">
+                          <div className="text-xs font-semibold text-zinc-200 group-hover:text-red-300 transition-colors truncate">
+                            YT-MP4.com
+                          </div>
+                          <div className="text-[10px] text-zinc-500 font-mono">
+                            Fast MP4 Downloader
+                          </div>
+                        </div>
+                      </div>
+                      <ExternalLink className="w-3.5 h-3.5 text-zinc-500 group-hover:text-red-400 shrink-0 ml-2 transition-colors" />
+                    </a>
+                  </div>
                 </div>
-                <span className="text-sm font-semibold text-zinc-200 tracking-tight">
-                  {t.viewport.dropzoneTitle}
-                </span>
-                <span className="text-xs text-zinc-500 mt-1 max-w-xs leading-relaxed">
-                  {t.viewport.dropzoneDesc}
-                </span>
-              </label>
+              </div>
             )}
           </div>
 
