@@ -2,7 +2,7 @@
 const nextConfig = {
   reactStrictMode: false,
   experimental: {
-    serverComponentsExternalPackages: ["@huggingface/transformers", "onnxruntime-node", "sharp", "ws", "bufferutil", "utf-8-validate"],
+    serverComponentsExternalPackages: ["@huggingface/transformers", "onnxruntime-node", "sharp", "ws"],
   },
   webpack: (config, { isServer }) => {
     config.resolve.alias = {
