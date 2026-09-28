@@ -4,7 +4,7 @@ import logging
 import os
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("recapmaster-worker")
@@ -15,13 +15,14 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Allow requests from RecapMaster Web and localhost
+# Clean CORS for wildcard origin without credential conflicts
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "HEAD", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition", "Content-Length", "Content-Type"],
 )
 
 # Render health checks use HEAD or GET requests
@@ -71,24 +72,28 @@ def download_stream(url: str = Query(..., description="YouTube video URL")):
     if not url:
         raise HTTPException(status_code=400, detail="URL parameter required")
 
-    # Format 18 = 360p/640x360 mp4 progressive (video+audio combined)
-    # best[ext=mp4] = highest quality progressive mp4
+    logger.info(f"Starting download stream for: {url}")
+
+    # Format 18 is 360p progressive MP4 (audio + video combined)
+    # best[ext=mp4] selects progressive single MP4 stream
     cmd = [
         "yt-dlp",
         "--extractor-args", "youtube:player_client=ios,android,web",
         "-f", "18/best[ext=mp4]/best",
         "-o", "-",
         "--no-playlist",
+        "--no-part",
         "--no-check-certificates",
         url
     ]
 
     try:
+        # Crucial: stderr=subprocess.DEVNULL prevents buffer deadlocks in Linux
         proc = subprocess.Popen(
             cmd,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=64 * 1024
+            stderr=subprocess.DEVNULL,
+            bufsize=128 * 1024
         )
 
         def iter_stream():
@@ -99,17 +104,19 @@ def download_stream(url: str = Query(..., description="YouTube video URL")):
                         break
                     yield chunk
             except Exception as e:
-                logger.error(f"Streaming interrupted: {e}")
+                logger.error(f"Stream generation error: {e}")
             finally:
-                proc.stdout.close()
-                proc.kill()
+                try:
+                    proc.stdout.close()
+                    proc.kill()
+                except Exception:
+                    pass
 
         return StreamingResponse(
             iter_stream(),
             media_type="video/mp4",
             headers={
                 "Content-Disposition": 'inline; filename="recap_video.mp4"',
-                "Access-Control-Allow-Origin": "*",
                 "Cache-Control": "no-cache",
             }
         )

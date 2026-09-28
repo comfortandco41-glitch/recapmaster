@@ -267,10 +267,19 @@ export function WebRecapStudio() {
 
       const blob = await res.blob();
       if (!blob || blob.size < 50000) {
+        let errorDetail = "";
+        try {
+          if (blob && blob.size > 0 && blob.size < 2000) {
+            errorDetail = await blob.text();
+          }
+        } catch {}
+
         throw new Error(
-          appLang === "my"
-            ? "Cloud Serverless (Vercel) ပေါ်တွင် YouTube BotGuard IP ကန့်သတ်ချက်ကြောင့် ဗီဒီယို တိုက်ရိုက်ဆွဲယူ၍ မရနိုင်သေးပါ။ အောက်ပါ 1-Click Helper ဖြင့် ရယူပြီး ဖိုင်တင်ပေးပါရန်။"
-            : "Direct stream was blocked or truncated by YouTube on cloud serverless IP. Please use the 1-click helper below to download the video."
+          errorDetail && errorDetail.length < 150
+            ? errorDetail
+            : (appLang === "my"
+                ? "YouTube ဗီဒီယို stream အချက်အလက် မပြည့်စုံသေးပါ။ အောက်ပါ ၁-Click Helper ဖြင့် MP4 ကို အလွယ်တကူ ရယူနိုင်ပါသည်။"
+                : "Video stream incomplete or blocked. Please use the 1-click helper below to download the video.")
         );
       }
 
